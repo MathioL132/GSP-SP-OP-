@@ -28,7 +28,7 @@ int main(int argc, char* argv[]) {
     long three_edges = atol(argv[5]);
     long seed = (argc == 7) ? atol(argv[6]) : time(0);
 
-    // Validating parameterss
+    // Validating parameters
     if (lC < 3) {
         fprintf(stderr, "Error: lC must be at least 3\n");
         return 1;
@@ -51,7 +51,7 @@ int main(int argc, char* argv[]) {
     long n = nC * lC + nK * lK;
     long m = nC * lC + nK * (lK * (lK - 1)) / 2 + (2 + three_edges) * (nC + nK - 1);
 
-    // Use vectors to store edges for easier management
+    
     std::vector<std::pair<long, long>> edges;
     edges.reserve(m);
 
@@ -68,10 +68,10 @@ int main(int argc, char* argv[]) {
     // Shuffle types
     std::vector<char> graph_type;
     for (long i = 0; i < nC; i++) {
-        graph_type.push_back(0); // cycle
+        graph_type.push_back(0); 
     }
     for (long i = 0; i < nK; i++) {
-        graph_type.push_back(1); // complete
+        graph_type.push_back(1);
     }
     for (long i = 0; i < nC + nK; i++) {
         long j = i + rand() % (nC + nK - i);
@@ -83,12 +83,12 @@ int main(int argc, char* argv[]) {
     long currentNode = 0;
     for (long i = 0; i < nC + nK; i++) {
         startNode[i] = currentNode;
-        if (graph_type[i] == 0) { // cycle
+        if (graph_type[i] == 0) { 
             for (long j = 0; j < lC; j++) {
                 edges.push_back({nodes[currentNode + j], nodes[currentNode + (j + 1) % lC]});
             }
             currentNode += lC;
-        } else { // complete
+        } else { 
             for (long j = 0; j < lK; j++) {
                 for (long k = j + 1; k < lK; k++) {
                     edges.push_back({nodes[currentNode + j], nodes[currentNode + k]});
@@ -134,24 +134,23 @@ int main(int argc, char* argv[]) {
         }
     }
 
-    // Shuffle edges
-    for (long i = 0; i < m; i++) {
-        long j = i + rand() % (m - i);
-        std::swap(edges[i], edges[j]);
+    std::set<std::pair<long, long>> unique_edges_set;
+    for (const auto& edge : edges) {
+        long u = edge.first, v = edge.second;
+        if (u > v) std::swap(u, v); 
+        unique_edges_set.insert({u, v});
+    }
+
+    std::vector<std::pair<long, long>> unique_edges(unique_edges_set.begin(), unique_edges_set.end());
+
+    for (long i = 0; i < (long)unique_edges.size(); i++) {
+        long j = i + rand() % (unique_edges.size() - i);
+        std::swap(unique_edges[i], unique_edges[j]);
         if (rand() % 2 == 0) {
-            std::swap(edges[i].first, edges[i].second);
+            std::swap(unique_edges[i].first, unique_edges[i].second);
         }
     }
 
-    // Remove duplicate edges, just in case shoudn't have any duplicates.
-    std::set<std::pair<long, long>> unique_edges;
-    for (const auto& edge : edges) {
-        long u = edge.first, v = edge.second;
-        if (u > v) std::swap(u, v); // normalize edge direction
-        unique_edges.insert({u, v});
-    }
-
-   
     std::cout << n << " " << unique_edges.size() << "\n";
     for (const auto& edge : unique_edges) {
         std::cout << edge.first << " " << edge.second << "\n";
