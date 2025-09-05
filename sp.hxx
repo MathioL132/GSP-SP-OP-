@@ -1,0 +1,303 @@
+#include <iostream>
+#include <vector>
+#include <stack>
+#include <algorithm>
+#include <memory>
+#include <fstream>
+
+// graph structure
+struct graph {
+    int n, e;
+    std::vector<std::vector<int>> adjLists;
+    
+    void add_edge(int u, int v) {
+        adjLists[u].push_back(v);
+        adjLists[v].push_back(u);
+    }
+    
+    friend std::istream& operator>>(std::istream& is, graph& g) {
+        is >> g.n >> g.e;
+        g.adjLists.clear();
+        g.adjLists.resize(g.n);
+        
+        for (int i = 0; i < g.e; i++) {
+            int u, v;
+            is >> u >> v;
+            g.add_edge(u, v);
+        }
+        return is;
+    }
+};
+
+using edge_t = std::pair<int, int>;
+
+enum class sp_violation_type {
+    NONE,
+    K4_SUBDIVISION,
+    T4_SUBDIVISION, 
+    THREE_COMPONENT_CUT,
+    THREE_CUT_COMPONENT
+};
+
+struct sp_result {
+    bool is_sp;
+    sp_violation_type violation;
+    std::string violation_description;
+};
+
+// Simplified biconnected components finder
+std::vector<edge_t> get_bicomps(const graph& g, std::vector<int>& cut_verts, sp_result& result, int root = 0) {
+    std::vector<int> dfs_no(g.n, 0);
+    std::vector<int> parent(g.n, 0); 
+    std::vector<int> low(g.n, 0);
+    
+    std::vector<edge_t> bicomps;
+    std::stack<std::pair<int, int>> dfs;
+    
+    dfs.emplace(root, 0);
+    dfs_no[root] = 1;
+    low[root] = 1;
+    parent[root] = -1;
+    int curr_dfs = 2;
+    bool root_cut = false;
+    
+    while (!dfs.empty()) {
+        std::pair<int, int> p = dfs.top();
+        int w = p.first;
+        int u = g.adjLists[p.first][p.second];
+        
+        if (dfs_no[u] == 0) {
+            dfs.push(std::pair{u, 0});
+            parent[u] = w;
+            dfs_no[u] = curr_dfs++;
+            low[u] = dfs_no[u];
+            continue;
+        }
+        
+        if (parent[u] == w) { // tree edge
+            if (low[u] >= dfs_no[w]) { // biconnected component found
+                if (cut_verts[w] != -1) {
+                    if (w != root || root_cut) {
+                        result.is_sp = false;
+                        result.violation = sp_violation_type::THREE_COMPONENT_CUT;
+                        result.violation_description = "Found cut vertex contained in three or more biconnected components";
+                        return bicomps;
+                    } else {
+                        root_cut = true;
+                    }
+                } else {
+                    cut_verts[w] = bicomps.size();
+                }
+                bicomps.emplace_back(w, u);
+            }
+            if (low[u] < low[w]) low[w] = low[u];
+        } else if (dfs_no[u] < dfs_no[w] && u != parent[w]) { // back edge
+            if (dfs_no[u] < low[w]) low[w] = dfs_no[u];
+        }
+        
+        if ((size_t)(++dfs.top().second) >= g.adjLists[p.first].size()) {
+            dfs.pop();
+        }
+    }
+    
+    if (!root_cut) cut_verts[root] = -1;
+    
+    // Check for three-cut-component violation
+    int n_bicomps = (int)bicomps.size();
+    std::vector<int> prev_cut(n_bicomps, -1);
+    int root_children = 0;
+    
+    for (int i = 0; i < n_bicomps - 1; i++) {
+        int w = bicomps[i].first;
+        int start = w;
+        
+        while (w != root) {
+            int u = w;
+            w = parent[w];
+            
+            if (cut_verts[w] != -1 && u == bicomps[cut_verts[w]].second) {
+                if (prev_cut[cut_verts[w]] == -1) {
+                    prev_cut[cut_verts[w]] = start;
+                } else {
+                    result.is_sp = false;
+                    result.violation = sp_violation_type::THREE_CUT_COMPONENT;
+                    result.violation_description = "Found biconnected component with three or more cut vertices";
+                    return bicomps;
+                }
+                break;
+            }
+        }
+        
+        if (w == root) {
+            root_children++;
+            if (root_children > 2) {
+                result.is_sp = false;
+                result.violation = sp_violation_type::THREE_CUT_COMPONENT;
+                result.violation_description = "Root biconnected component has three or more cut vertices";
+                return bicomps;
+            }
+        }
+    }
+    
+    return bicomps;
+}
+
+//  SP recognition for a single biconnected component
+bool is_bicomp_sp(const graph& g, int root, int next, sp_result& result) {
+    std::vector<int> dfs_no(g.n + 1, 0);
+    std::vector<int> parent(g.n, 0);
+    std::vector<edge_t> ear(g.n, edge_t{g.n, g.n});
+    std::vector<int> num_children(g.n, 0);
+    
+    std::stack<std::pair<int, int>> dfs;
+    dfs.emplace(root, -1);
+    dfs.emplace(next, 0);
+    
+    dfs_no[root] = 1;
+    parent[root] = -1;
+    dfs_no[next] = 2;
+    parent[next] = root;
+    dfs_no[g.n] = g.n;
+    int curr_dfs = 3;
+    
+    // Check if edge exists (for fake edge detection)
+    bool fake_edge = true;
+    for (int u1 : g.adjLists[next]) {
+        if (u1 == root) {
+            fake_edge = false;
+            break;
+        }
+    }
+    
+    while (!dfs.empty()) {
+        std::pair<int, int> p = dfs.top();
+        int w = p.first;
+        int v = parent[w];
+        int u = g.adjLists[p.first][p.second];
+        
+        if (dfs_no[u] == 0) { // unvisited
+            dfs.push(std::pair{u, 0});
+            parent[u] = w;
+            dfs_no[u] = curr_dfs++;
+            num_children[w]++;
+            
+            // Check for too many children (means non-planarity)
+            if (num_children[w] > 2) {
+                result.is_sp = false;
+                result.violation = sp_violation_type::K4_SUBDIVISION;
+                result.violation_description = "Found vertex with more than 2 children (K4 subdivision)";
+                return false;
+            }
+            continue;
+        }
+        
+        bool child_back_edge = (dfs_no[u] < dfs_no[w] && u != v);
+        
+        if (parent[u] == w || child_back_edge) {
+            edge_t ear_f = child_back_edge ? edge_t{w, u} : ear[u];
+            
+            // Simplified ear management
+            if (dfs_no[ear_f.second] < dfs_no[ear[w].second]) {
+                // Check for interlacing ears (K4 violation)
+                if (ear[w].first != g.n && ear_f.second != ear[w].second) {
+                    result.is_sp = false;
+                    result.violation = sp_violation_type::K4_SUBDIVISION;
+                    result.violation_description = "Found interlacing ears (K4 subdivision)";
+                    return false;
+                }
+                ear[w] = ear_f;
+            }
+        }
+        
+        if ((size_t)(++dfs.top().second) >= g.adjLists[p.first].size()) {
+            dfs.pop();
+        }
+    }
+    
+    return true;
+}
+
+sp_result recognize_series_parallel(const graph& g) {
+    sp_result result;
+    result.is_sp = true;
+    result.violation = sp_violation_type::NONE;
+    
+    if (g.n == 0) return result;
+    
+    std::vector<int> cut_verts(g.n, -1);
+    std::vector<edge_t> bicomps = get_bicomps(g, cut_verts, result);
+    
+    if (!result.is_sp) return result;
+    
+    // Check each biconnected component
+    for (size_t i = 0; i < bicomps.size(); i++) {
+        int root = bicomps[i].first;
+        int next = bicomps[i].second;
+        
+        if (!is_bicomp_sp(g, root, next, result)) {
+            return result;
+        }
+    }
+    
+    return result;
+}
+
+void print_usage(const char* program_name) {
+    std::cout << "Usage: " << program_name << " [input_file]\n";
+    std::cout << "  If no input file is provided, reads from stdin\n";
+    std::cout << "Input format:\n";
+    std::cout << "  First line: n m (number of vertices and edges)\n";
+    std::cout << "  Next m lines: u v (edge from vertex u to vertex v)\n";
+}
+
+int main(int argc, char* argv[]) {
+    std::istream* input = &std::cin;
+    std::ifstream file;
+    
+    if (argc > 2) {
+        print_usage(argv[0]);
+        return 1;
+    }
+    
+    if (argc == 2) {
+        file.open(argv[1]);
+        if (!file.is_open()) {
+            std::cerr << "Error: Cannot open file " << argv[1] << std::endl;
+            return 1;
+        }
+        input = &file;
+    }
+    
+    graph g;
+    if (!(*input >> g)) {
+        std::cerr << "Error: Invalid input format" << std::endl;
+        return 1;
+    }
+    
+    //  basic requirements check
+    if (g.n == 0) {
+        std::cout << "Graph is series-parallel: YES (empty graph)" << std::endl;
+        return 0;
+    }
+    
+    if (g.n == 1) {
+        std::cout << "Graph is series-parallel: YES (single vertex)" << std::endl;
+        return 0;
+    }
+    
+    if (g.e < g.n - 1) {
+        std::cout << "Graph is series-parallel: NO (disconnected)" << std::endl;
+        return 0;
+    }
+    
+    sp_result result = recognize_series_parallel(g);
+    
+    if (result.is_sp) {
+        std::cout << "Graph is series-parallel: YES" << std::endl;
+    } else {
+        std::cout << "Graph is series-parallel: NO" << std::endl;
+        std::cout << "Reason: " << result.violation_description << std::endl;
+    }
+    
+    return 0;
+}
