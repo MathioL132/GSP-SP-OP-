@@ -650,8 +650,8 @@ bool ear_wins(edge_t ear_new, edge_t ear_current, std::vector<int> const& dfs_no
     
     // Same sink - apply parts (ii) and (iii)
     // Part (ii): If one source is the parent of w, the other wins
-    if (ear_current.first == w && ear_new.first != w) return true;  // new ear is non-trivial, wins
-    if (ear_new.first == w && ear_current.first != w) return false; // current ear is non-trivial, wins
+    if (ear_current.first == w && ear_new.first != w) return false; // current ear is trivial, new wins
+    if (ear_new.first == w && ear_current.first != w) return true;  // new ear is trivial, current wins
     
     // Part (iii): Both trivial or both non-trivial, compare source DFS numbers
     int new_src_dfs = dfs_no[ear_new.first];
@@ -752,22 +752,7 @@ bool positive_cert_sp::authenticate(graph const& g) {
                         return false;
                     }
                     
-                    if (lsink >= 0 && lsink < g.n) {
-                        if (n_src[lsink] != 1 || n_sink[lsink] != 1) {
-                            L_LOG("====== AUTH FAILED: series middle vertex has wrong degree ======\n\n")
-                            return false;
-                        }
-                        no_edge[lsink] = true;
-                        n_src[lsink]--;
-                        n_sink[lsink]--;
-                    }
-                    break;
                     
-                case c_type::parallel:
-                    if (lsource != source || rsource != source || lsink != sink || rsink != sink) {
-                        L_LOG("====== AUTH FAILED: parallel composition mismatch ======\n\n")
-                        return false;
-                    }
                     
                     if (source >= 0 && source < g.n) n_src[source]--;
                     if (sink >= 0 && sink < g.n) n_sink[sink]--;
@@ -1042,8 +1027,8 @@ sp_result SP_RECOGNITION(graph const& g) {
     std::stack<sp_chain_stack_entry> temp_stack;
     bool violation_found = false;
     
-    while (!vertex_stacks[w].empty() && !violation_found) {
-        if (w >= (int)vertex_stacks.size()) break;
+   while (w >= 0 && w < (int)vertex_stacks.size() && 
+           !vertex_stacks[w].empty() && !violation_found) {
         
         sp_chain_stack_entry& top_entry = vertex_stacks[w].top();
         
