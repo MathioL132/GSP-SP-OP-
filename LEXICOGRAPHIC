@@ -629,20 +629,33 @@ bool negative_cert_tri_cut_comp::authenticate(graph const& g) {
     return false;
 }
 bool ear_wins(edge_t ear_new, edge_t ear_current, std::vector<int> const& dfs_no, int w) {
-    if (ear_current.first >= (int)dfs_no.size()) return true;
+    // Handle infinity ear (no current ear)
+    if (ear_current.first >= (int)dfs_no.size() || ear_current.second >= (int)dfs_no.size()) {
+        return true;
+    }
     
-    int new_sink_dfs = (ear_new.second < (int)dfs_no.size()) ? dfs_no[ear_new.second] : INT_MAX;
-    int curr_sink_dfs = (ear_current.second < (int)dfs_no.size()) ? dfs_no[ear_current.second] : INT_MAX;
+    // Validate bounds
+    if (ear_new.first >= (int)dfs_no.size() || ear_new.second >= (int)dfs_no.size() ||
+        ear_new.first < 0 || ear_new.second < 0 || 
+        ear_current.first < 0 || ear_current.second < 0) {
+        return false;
+    }
     
+    int new_sink_dfs = dfs_no[ear_new.second];
+    int curr_sink_dfs = dfs_no[ear_current.second];
+    
+    // Part (i): Compare sink DFS numbers (lexicographically earlier = smaller DFS number)
     if (new_sink_dfs < curr_sink_dfs) return true;
     if (new_sink_dfs > curr_sink_dfs) return false;
     
-    // Same sink - compare sources
-    int new_src_dfs = (ear_new.first < (int)dfs_no.size()) ? dfs_no[ear_new.first] : INT_MAX;
-    int curr_src_dfs = (ear_current.first < (int)dfs_no.size()) ? dfs_no[ear_current.first] : INT_MAX;
+    // Same sink - apply parts (ii) and (iii)
+    // Part (ii): If one source is the parent of w, the other wins
+    if (ear_current.first == w && ear_new.first != w) return true;  // new ear is non-trivial, wins
+    if (ear_new.first == w && ear_current.first != w) return false; // current ear is non-trivial, wins
     
-    if (ear_current.first == w && ear_new.first != w) return false;
-    if (ear_new.first == w && ear_current.first != w) return true;
+    // Part (iii): Both trivial or both non-trivial, compare source DFS numbers
+    int new_src_dfs = dfs_no[ear_new.first];
+    int curr_src_dfs = dfs_no[ear_current.first];
     
     return new_src_dfs < curr_src_dfs;
 }
@@ -732,19 +745,62 @@ bool positive_cert_sp::authenticate(graph const& g) {
             int rsink = frame.swap_state ? frame.node->r->source : frame.node->r->sink;
             
             // For antiparallel, right child sources/sinks are swapped
-           if (frame.node->comp == c_type::antiparallel) {
- 
-    if (lsource != source || rsink != source || lsink != sink || rsource != sink) {
-        L_LOG("====== AUTH FAILED: antiparallel composition mismatch ======\n\n")
-        return false;
-    }
-} else {
-
-    if (lsource != source || rsource != source || lsink != sink || rsink != sink) {
-        L_LOG("====== AUTH FAILED: parallel composition mismatch ======\n\n")
-        return false;
-    }
-}
+           switch (frame.node->comp) {
+                case c_type::series:
+                    if (lsource != source || rsink != sink || lsink != rsource) {
+                        L_LOG("====== AUTH FAILED: series composition mismatch ======\n\n")
+                        return false;
+                    }
+                    
+                    if (lsink >= 0 && lsink < g.n) {
+                        if (n_src[lsink] != 1 || n_sink[lsink] != 1) {
+                            L_LOG("====== AUTH FAILED: series middle vertex has wrong degree ======\n\n")
+                            return false;
+                        }
+                        no_edge[lsink] = true;
+                        n_src[lsink]--;
+                        n_sink[lsink]--;
+                    }
+                    break;
+                    
+                case c_type::parallel:
+                    if (lsource != source || rsource != source || lsink != sink || rsink != sink) {
+                        L_LOG("====== AUTH FAILED: parallel composition mismatch ======\n\n")
+                        return false;
+                    }
+                    
+                    if (source >= 0 && source < g.n) n_src[source]--;
+                    if (sink >= 0 && sink < g.n) n_sink[sink]--;
+                    break;
+                    
+                case c_type::antiparallel:
+                    // For antiparallel: left child normal, right child has swapped source/sink
+                    if (frame.swap_state) {
+                        // If we're already swapped, the left child is the one that's swapped relative to parent
+                        if (lsource != sink || rsource != source || lsink != source || rsink != sink) {
+                            L_LOG("====== AUTH FAILED: antiparallel composition mismatch (swapped) ======\n\n")
+                            return false;
+                        }
+                    } else {
+                        // Normal case: right child is swapped
+                        if (lsource != source || rsource != sink || lsink != sink || rsink != source) {
+                            L_LOG("====== AUTH FAILED: antiparallel composition mismatch ======\n\n")
+                            return false;
+                        }
+                    }
+                    
+                    if (source >= 0 && source < g.n) n_src[source]--;
+                    if (sink >= 0 && sink < g.n) n_sink[sink]--;
+                    break;
+                    
+                case c_type::dangling:
+                    L_LOG("====== AUTH FAILED: dangling composition not allowed in SP tree ======\n\n")
+                    return false;
+                    
+                case c_type::edge:
+                    L_LOG("====== AUTH FAILED: internal node cannot be an edge ======\n\n")
+                    return false;
+            }
 
                     if (lsink >= 0 && lsink < g.n) {
                         if (n_src[lsink] != 1 || n_sink[lsink] != 1) {
@@ -987,9 +1043,12 @@ sp_result SP_RECOGNITION(graph const& g) {
     bool violation_found = false;
     
     while (!vertex_stacks[w].empty() && !violation_found) {
+        if (w >= (int)vertex_stacks.size()) break;
+        
         sp_chain_stack_entry& top_entry = vertex_stacks[w].top();
         
         if (seq[u].source() != top_entry.end) {
+            // Interlacing detected - generate K4
             // Interlacing detected - generate K4
             N_LOG("SP violation: interlacing detected\n")
             
@@ -1483,9 +1542,16 @@ void report_K4_sp(sp_result& cert_out,
     safe_add_path(k4->cd, k4->c, k4->d);
 
     // Build ad path (through the cut-off ear)
-    if (elose >= 0 && elose < n) {
+   // Build ad path (through the cut-off ear and back around)
+    if (elose >= 0 && elose < n && ewin_sink >= 0 && ewin_sink < n) {
+        // First add the cut-off ear's back edge
         k4->ad.emplace_back(k4->d, elose);
-        safe_add_path(k4->ad, elose, k4->a);
+        // Then trace up to the holding ear's sink
+        safe_add_path(k4->ad, elose, ewin_sink);
+        // Add the holding ear's back edge (reversed)
+        k4->ad.emplace_back(ewin_sink, ewin_src);
+        // Complete the path to vertex a
+        safe_add_path(k4->ad, ewin_src, k4->a);
     }
     
     // Build bd path (through the winning ear)
