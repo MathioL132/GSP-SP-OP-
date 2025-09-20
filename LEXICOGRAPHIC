@@ -650,8 +650,9 @@ bool ear_wins(edge_t ear_new, edge_t ear_current, std::vector<int> const& dfs_no
     
     // Same sink - apply parts (ii) and (iii)
     // Part (ii): If one source is the parent of w, the other wins
-    if (ear_current.first == w && ear_new.first != w) return false; // current ear is trivial, new wins
-    if (ear_new.first == w && ear_current.first != w) return true;  // new ear is trivial, current wins
+    // Part (ii): Trivial ears (source == w) win over non-trivial ears
+if (ear_new.first == w && ear_current.first != w) return true;     // new is trivial, wins
+if (ear_current.first == w && ear_new.first != w) return false;    // current is trivial, wins
     
     // Part (iii): Both trivial or both non-trivial, compare source DFS numbers
     int new_src_dfs = dfs_no[ear_new.first];
@@ -659,7 +660,9 @@ bool ear_wins(edge_t ear_new, edge_t ear_current, std::vector<int> const& dfs_no
     
     return new_src_dfs < curr_src_dfs;
 }
-bool positive_cert_sp::authenticate(graph const& g) {
+
+
+    bool positive_cert_sp::authenticate(graph const& g) {
     if (verified) return true;
 
     std::vector<int> n_src(g.n, 0);
@@ -690,21 +693,21 @@ bool positive_cert_sp::authenticate(graph const& g) {
     while (!hist.empty()) {
         TraversalFrame frame = hist.top();
         hist.pop();
-        
+
         if (!frame.node) continue;
-        
+
         int source = frame.swap_state ? frame.node->sink : frame.node->source;
         int sink = frame.swap_state ? frame.node->source : frame.node->sink;
 
         if (frame.phase == 0) {
-            // First visit
+            // First visit - schedule children
             if (!(frame.node->l) && !(frame.node->r)) {
                 // Leaf node
                 if (frame.node->comp != c_type::edge) {
                     L_LOG("====== AUTH FAILED: leaf node is not an edge ======\n\n")
                     return false;
                 }
-                
+
                 if (source < 0 || source >= g.n || sink < 0 || sink >= g.n) {
                     L_LOG("====== AUTH FAILED: invalid vertex indices in edge ======\n\n")
                     return false;
@@ -722,99 +725,138 @@ bool positive_cert_sp::authenticate(graph const& g) {
             } else if (frame.node->l && frame.node->r) {
                 // Internal node - schedule processing
                 hist.emplace(frame.node, 1, frame.swap_state); // Schedule final processing
-                
+
                 // For antiparallel, right child is swapped, left is not
                 bool right_swap = (frame.node->comp == c_type::antiparallel) ? !frame.swap_state : frame.swap_state;
                 bool left_swap = frame.swap_state;
-                
+
                 hist.emplace(frame.node->l, 0, left_swap);   // Left child
                 hist.emplace(frame.node->r, 0, right_swap);  // Right child
-                
+
             } else {
                 L_LOG("====== AUTH FAILED: node has exactly one child ======\n\n")
                 return false;
             }
+
         } else {
             // Final processing after children
             if (!frame.node->l || !frame.node->r) continue;
-            
+
             // Apply swap semantics correctly
             int lsource = frame.swap_state ? frame.node->l->sink : frame.node->l->source;
-            int lsink = frame.swap_state ? frame.node->l->source : frame.node->l->sink;
+            int lsink   = frame.swap_state ? frame.node->l->source : frame.node->l->sink;
             int rsource = frame.swap_state ? frame.node->r->sink : frame.node->r->source;
-            int rsink = frame.swap_state ? frame.node->r->source : frame.node->r->sink;
-            
-            // For antiparallel, right child sources/sinks are swapped
-           switch (frame.node->comp) {
+            int rsink   = frame.swap_state ? frame.node->r->source : frame.node->r->sink;
+
+            switch (frame.node->comp) {
                 case c_type::series:
                     if (lsource != source || rsink != sink || lsink != rsource) {
                         L_LOG("====== AUTH FAILED: series composition mismatch ======\n\n")
                         return false;
                     }
-                    
-                    
-                    
-                    if (source >= 0 && source < g.n) n_src[source]--;
-                    if (sink >= 0 && sink < g.n) n_sink[sink]--;
-                    break;
-                    
-                case c_type::antiparallel:
-                    // For antiparallel: left child normal, right child has swapped source/sink
-                    if (frame.swap_state) {
-                        // If we're already swapped, the left child is the one that's swapped relative to parent
-                        if (lsource != sink || rsource != source || lsink != source || rsink != sink) {
-                            L_LOG("====== AUTH FAILED: antiparallel composition mismatch (swapped) ======\n\n")
-                            return false;
-                        }
-                    } else {
-                        // Normal case: right child is swapped
-                        if (lsource != source || rsource != sink || lsink != sink || rsink != source) {
-                            L_LOG("====== AUTH FAILED: antiparallel composition mismatch ======\n\n")
-                            return false;
-                        }
+                    if (lsink >= 0 && lsink < g.n && (n_src[lsink] != 1 || n_sink[lsink] != 1)) {
+                        L_LOG("====== AUTH FAILED: series middle vertex has incorrect counts ======\n\n")
+                        return false;
                     }
-                    
-                    if (source >= 0 && source < g.n) n_src[source]--;
-                    if (sink >= 0 && sink < g.n) n_sink[sink]--;
-                    break;
-                    
-                case c_type::dangling:
-                    L_LOG("====== AUTH FAILED: dangling composition not allowed in SP tree ======\n\n")
-                    return false;
-                    
-                case c_type::edge:
-                    L_LOG("====== AUTH FAILED: internal node cannot be an edge ======\n\n")
-                    return false;
-            }
-
                     if (lsink >= 0 && lsink < g.n) {
-                        if (n_src[lsink] != 1 || n_sink[lsink] != 1) {
-                            L_LOG("====== AUTH FAILED: series middle vertex has wrong degree ======\n\n")
-                            return false;
-                        }
+                        V_LOG("BLOCKING: " << lsink << "\n")
                         no_edge[lsink] = true;
                         n_src[lsink]--;
                         n_sink[lsink]--;
                     }
                     break;
-                    
+
                 case c_type::parallel:
-                case c_type::antiparallel:
                     if (lsource != source || rsource != source || lsink != sink || rsink != sink) {
                         L_LOG("====== AUTH FAILED: parallel composition mismatch ======\n\n")
                         return false;
                     }
-
                     if (source >= 0 && source < g.n) n_src[source]--;
-                    if (sink >= 0 && sink < g.n) n_sink[sink]--;
+                    if (sink   >= 0 && sink   < g.n) n_sink[sink]--;
                     break;
-                    
+
+                case c_type::antiparallel:
+                    if (frame.swap_state) {
+                        if (lsource != sink || rsource != source || lsink != source || rsink != sink) {
+                            L_LOG("====== AUTH FAILED: antiparallel composition mismatch (swapped) ======\n\n")
+                            return false;
+                        }
+                    } else {
+                        if (lsource != source || rsource != sink || lsink != sink || rsink != source) {
+                            L_LOG("====== AUTH FAILED: antiparallel composition mismatch ======\n\n")
+                            return false;
+                        }
+                    }
+                    if (source >= 0 && source < g.n) n_src[source]--;
+                    if (sink   >= 0 && sink   < g.n) n_sink[sink]--;
+                    break;
+
                 case c_type::dangling:
-                    L_LOG("====== AUTH FAILED: dangling composition in SP tree ======\n\n")
+                    L_LOG("====== AUTH FAILED: dangling composition not allowed in SP tree ======\n\n")
+                    return false;
+
+                case c_type::edge:
+                    L_LOG("====== AUTH FAILED: internal node cannot be an edge ======\n\n")
                     return false;
             }
         }
     }
+
+    N_LOG("decomposition tree well-formed...\n")
+    
+    if (decomposition.root->source >= 0 && decomposition.root->source < g.n) {
+        n_src[decomposition.root->source]--;
+    }
+    if (decomposition.root->sink >= 0 && decomposition.root->sink < g.n) {
+        n_sink[decomposition.root->sink]--;
+    }
+
+    bool failed = false;
+    for (int i = 0; i < g.n; i++) {
+        if (n_src[i] != 0) {
+            N_LOG("ERROR: disconnected SP subgraph sourced at vertex " << i << "\n")
+            failed = true;
+        }
+        
+        if (n_sink[i] != 0) {
+            N_LOG("ERROR: disconnected SP subgraph sinked at vertex " << i << "\n")
+            failed = true;
+        }
+    }
+
+    if (failed) {
+        L_LOG("====== AUTH FAILED: disconnected subgraphs ======\n\n")
+        return false;
+    }
+
+    N_LOG("decomposition tree connected...\n")
+
+    // Check graph isomorphism
+    for (int i = 0; i < g.n; i++) {
+        std::vector<int> l1 = g.adjLists[i];
+        std::vector<int> l2;
+        if (i < (int)g2.adjLists.size()) {
+            l2 = g2.adjLists[i];
+        }
+        
+        radix_sort(l1);
+        radix_sort(l2);
+        
+        if (l1 != l2) {
+            L_LOG("====== AUTH FAILED: adjacency list mismatch at vertex " << i << " ======\n\n")
+            return false;
+        }
+    }
+
+    N_LOG("decomposition tree produces graph identical to G...\n")
+    L_LOG("====== AUTH SUCCESS ======\n\n")
+
+    verified = true;
+    return true;
+}
+
+                   
+      
 
     N_LOG("decomposition tree well-formed...\n")
     
@@ -975,7 +1017,7 @@ sp_result SP_RECOGNITION(graph const& g) {
                     }
 
                     if (v == root) {
-                        seq[w].compose((fake_edge ? sp_tree{} : sp_tree{v, w}), c_type::parallel);
+                                    seq[w].compose((fake_edge ? sp_tree{} : sp_tree{v, w}), c_type::series);
 
                         if (cut_verts[w] != -1 && cut_verts[w] >= 0 && cut_verts[w] < (int)cut_vertex_attached_tree.size()) {
                             seq[w].compose(std::move(cut_vertex_attached_tree[cut_verts[w]]), c_type::series);
@@ -1020,20 +1062,18 @@ sp_result SP_RECOGNITION(graph const& g) {
 
                 bool child_back_edge = (dfs_no[u] < dfs_no[w] && u != v);
 
-                if (parent[u] == w) {
+               if (parent[u] == w) {
     N_LOG("tree edge (" << w << ", " << u << ")\n")
     
     // Process vertex stack with proper interlacing check
-    std::stack<sp_chain_stack_entry> temp_stack;
     bool violation_found = false;
     
-   while (w >= 0 && w < (int)vertex_stacks.size() && 
+    while (w >= 0 && w < (int)vertex_stacks.size() && 
            !vertex_stacks[w].empty() && !violation_found) {
         
         sp_chain_stack_entry& top_entry = vertex_stacks[w].top();
         
         if (seq[u].source() != top_entry.end) {
-            // Interlacing detected - generate K4
             // Interlacing detected - generate K4
             N_LOG("SP violation: interlacing detected\n")
             
@@ -1043,62 +1083,64 @@ sp_result SP_RECOGNITION(graph const& g) {
             k4->c = w;
             k4->d = -1;
             
-            edge_t holding_ear = ear[u];
-            
-            // Build K4 paths safely
-            auto build_path = [&](std::vector<edge_t>& path, int start, int end) {
+            // Simple path building
+            auto append_path = [&](std::vector<edge_t>& path, int start, int end) {
+                if (start == end) return;
                 int current = start;
                 while (current != end && current >= 0 && current < g.n && 
                        current < (int)parent.size()) {
                     int next = parent[current];
-                    if (next >= 0 && next < g.n) {
-                        path.emplace_back(current, next);
-                        current = next;
-                    } else break;
+                    if (next < 0 || next >= g.n) break;
+                    path.emplace_back(current, next);
+                    current = next;
                 }
             };
             
-            build_path(k4->ab, k4->a, k4->b);
-            build_path(k4->bc, k4->b, k4->c);
+            append_path(k4->ab, k4->a, k4->b);
+            append_path(k4->bc, k4->b, k4->c);
             
-            // Find d by searching ancestor vertex stacks
-            int search_vertex = k4->c;
-            while (search_vertex >= 0 && search_vertex < g.n && 
-                   search_vertex < (int)parent.size() && k4->d == -1) {
-                
-                if (parent[search_vertex] >= 0 && parent[search_vertex] < g.n) {
-                    k4->cd.emplace_back(search_vertex, parent[search_vertex]);
-                }
-                search_vertex = parent[search_vertex];
-                
-                if (search_vertex >= 0 && search_vertex < (int)vertex_stacks.size()) {
-                    // Check if this vertex has the ear we're looking for
-                    auto& stack = vertex_stacks[search_vertex];
-                    if (!stack.empty() && stack.top().end == k4->b) {
+            // Find d by searching vertex stacks
+            int search_vertex = parent[k4->c];
+            while (search_vertex >= 0 && search_vertex < g.n && k4->d == -1) {
+                if (search_vertex < (int)vertex_stacks.size() && 
+                    !vertex_stacks[search_vertex].empty()) {
+                    if (vertex_stacks[search_vertex].top().end == k4->b) {
                         k4->d = search_vertex;
                         break;
                     }
                 }
+                search_vertex = parent[search_vertex];
             }
             
             if (k4->d >= 0) {
-                // Complete remaining paths
-                build_path(k4->ad, k4->d, holding_ear.second);
-                if (holding_ear.first >= 0 && holding_ear.first < g.n && 
-                    holding_ear.second >= 0 && holding_ear.second < g.n) {
-                    k4->ad.emplace_back(holding_ear.second, holding_ear.first);
-                    build_path(k4->ad, holding_ear.first, k4->a);
-                }
+                append_path(k4->cd, k4->c, k4->d);
+                append_path(k4->ad, k4->a, k4->d);
+                append_path(k4->bd, k4->b, k4->d);
                 
-                // Simple paths for the remaining connections
-                k4->bd.emplace_back(k4->d, k4->b);
-                k4->ac.emplace_back(k4->c, k4->a);
+                // Build ac using the interlacing ear
+                int ear_src = vertex_stacks[k4->d].top().SP.underlying_tree_path_source();
+                if (ear_src >= 0) {
+                    k4->ac.emplace_back(k4->c, ear_src);
+                    append_path(k4->ac, ear_src, k4->a);
+                }
                 
                 retval.reason = k4;
                 violation_found = true;
             }
             break;
         }
+        
+        // No violation - extend sequence
+        seq[u].compose(std::move(top_entry.SP), c_type::antiparallel);
+        seq[u].l_compose(std::move(top_entry.tail), c_type::series);
+        vertex_stacks[w].pop();
+    }
+    
+    if (violation_found) break;
+}
+}
+
+
         
         // No violation - extend sequence
         seq[u].compose(std::move(top_entry.SP), c_type::antiparallel);
@@ -1388,7 +1430,7 @@ std::vector<edge_t> get_bicomps_sp(graph const& g, std::vector<int>& cut_verts, 
             }
         }
 
-        if (w == root && (u == retval.back().second || u == -1)) {
+        if (w == root && (!retval.empty() && (u == retval.back().second || u == -1))) {
             if (root_one == -1) {
                 root_one = start;
             } else if (root_two == -1) {
