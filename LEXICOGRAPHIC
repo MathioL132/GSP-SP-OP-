@@ -648,7 +648,7 @@ L_LOG("====== AUTH FAILED: bicomp does not contain the three cut vertices ======
 return false;
 }
 
-bool ear_wins(edge_t ear_new, edge_t ear_current, std::vector const& dfs_no, int w) {
+bool ear_wins(edge_t ear_new, edge_t ear_current, std::vector<int> const& dfs_no, int w) {
 // Handle infinity ear (no current ear)
 if (ear_current.first >= (int)dfs_no.size() || ear_current.second >= (int)dfs_no.size()) {
 return true;
@@ -668,8 +668,8 @@ if (new_sink_dfs > curr_sink_dfs) return false;
 
 // Same sink - apply parts (ii) and (iii)
 // Part (ii): Trivial ears (source == w) win over non-trivial ears
-if (ear_new.first == w && ear_current.first != w) return true;     // new is trivial, wins
-if (ear_current.first == w && ear_new.first != w) return false;    // current is trivial, wins
+if (ear_new.first != w && ear_current.first == w) return true;     // non-trivial wins  
+if (ear_current.first != w && ear_new.first == w) return false;    // current is trivial, wins
 
 // Part (iii): Both trivial or both non-trivial, compare source DFS numbers
 int new_src_dfs = dfs_no[ear_new.first];
@@ -680,9 +680,9 @@ return new_src_dfs < curr_src_dfs;
 
 bool positive_cert_sp::authenticate(graph const& g) {
 if (verified) return true;
-std::vector n_src(g.n, 0);
-std::vector n_sink(g.n, 0);
-std::vector no_edge(g.n, false);
+std::vector<int> n_src(g.n, 0);
+std::vector<int> n_sink(g.n, 0);
+std::vector<bool> no_edge(g.n, false);
 graph g2{};
 g2.reserve(g);
 
@@ -872,8 +872,8 @@ return true;
 // ==================== SP RECOGNITION ALGORITHM ====================
 
 // Forward declarations
-std::vector<edge_t> get_bicomps_sp(graph const&, std::vector&, sp_result&, int = 0);
-void report_K4_sp(sp_result&, std::vector const&, std::vector<std::stack<sp_chain_stack_entry>>&, int, int, int, int, int, int);
+std::vector<edge_t> get_bicomps_sp(graph const&, std::vector<int>&, sp_result&, int = 0);
+void report_K4_sp(sp_result&, std::vector<int> const&, std::vector<std::stack<sp_chain_stack_entry>>&, int, int, int, int, int, int);
 int path_contains_edge(std::vector<edge_t> const&, edge_t);
 
 sp_result SP_RECOGNITION(graph const& g) {
@@ -916,7 +916,7 @@ std::vector<int> parent(g.n, 0);
 std::vector<edge_t> ear(g.n, edge_t{g.n, g.n});
 std::vector<sp_tree> seq(g.n);
 std::vector<int> earliest_outgoing(g.n, g.n);
-std::vector num_children(g.n, 0);
+std::vector<char> num_children(g.n, 0);
 std::stack<std::pair<int, int>> dfs;
 
 dfs_no[g.n] = g.n;
@@ -1259,13 +1259,13 @@ static const int k4_t4_endpoint_translation[6][4] = {{0, 1, 2, 3}, {0, 2, 1, 3},
 return retval;
 }
 
-std::vector<edge_t> get_bicomps_sp(graph const& g, std::vector& cut_verts, sp_result& cert_out, int root) {
+std::vector<edge_t> get_bicomps_sp(graph const& g, std::vector<int>& cut_verts, sp_result& cert_out, int root) {
 if (root < 0 || root >= g.n) {
 root = 0;
 }
-std::vector dfs_no(g.n, 0);
-std::vector parent(g.n, -1);
-std::vector low(g.n, 0);
+std::vector<int> dfs_no(g.n, 0);
+std::vector<int> parent(g.n, -1);
+std::vector<int> low(g.n, 0);
 std::vector<edge_t> retval;
 std::stack<std::pair<int, int>> dfs;
 
@@ -1447,7 +1447,7 @@ return retval;
 }
 
 void report_K4_sp(sp_result& cert_out,
-std::vector const& parent,
+std::vector<int> const& parent,
 std::vector<std::stack<sp_chain_stack_entry>>& vertex_stacks,
 int a,
 int b,
