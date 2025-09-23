@@ -943,6 +943,7 @@ for (int bicomp = 0; bicomp < n_bicomps; bicomp++) {
         N_LOG("ERROR: Invalid vertex indices in bicomp " << bicomp << "\n")
         continue;
     }
+        }
 
     dfs = std::stack<std::pair<int, int>>{}; // Clear stack
     dfs.emplace(root, -1);
@@ -983,6 +984,7 @@ seq[root] = sp_tree{root, root};
             dfs.pop();
             continue;
         }
+}
         
         int v = (parent[w] >= 0 && parent[w] < g.n) ? parent[w] : -1;
         
