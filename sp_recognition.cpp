@@ -958,17 +958,7 @@ for (int bicomp = 0; bicomp < n_bicomps; bicomp++) {
         
         int v = (parent[w] >= 0 && parent[w] < g.n) ? parent[w] : -1;
         
-        // Check if we need to return from DFS
-        if (adj_index >= (int)g.adjLists[w].size()) {
-            // Handle return from DFS
-            if (w != root) {
-                if (earliest_outgoing[w] != g.n && earliest_outgoing[w] >= 0 && earliest_outgoing[w] < g.n) {
-                    if (!vertex_stacks[earliest_outgoing[w]].empty()) {
-                        N_LOG("Moving sequence " << seq[w] << " to tail\n")
-                        vertex_stacks[earliest_outgoing[w]].top().tail = std::move(seq[w]);
-                    }
-                }
-
+     
                 // Check if we need to return from DFS
 if (adj_index >= (int)g.adjLists[w].size()) {
     // Handle return from DFS
