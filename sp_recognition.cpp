@@ -727,6 +727,13 @@ bool positive_cert_sp::authenticate(graph const& g) {
     if (verified) return true;
     
     L_LOG("====== AUTHENTICATE SP DECOMPOSITION TREE ======\n")
+        if (g.n <= 1 || g.e == 0) {
+        if (!decomposition.root) {
+            L_LOG("====== AUTH SUCCESS (trivial graph) ======\n\n")
+            verified = true;
+            return true;
+        }
+    }
     if (!decomposition.root) {
         L_LOG("====== AUTH FAILED: decomposition tree does not exist ======\n\n")
         return false;
@@ -847,6 +854,14 @@ int path_contains_edge(std::vector<edge_t> const&, edge_t);
 
 sp_result SP_RECOGNITION(graph const& g) {
 sp_result retval{};
+        if (g.n <= 0) {
+        // Empty graph - create minimal valid certificate
+        std::shared_ptr<positive_cert_sp> sp{new positive_cert_sp{}};
+        // Empty decomposition is valid for empty graph
+        retval.reason = sp;
+        retval.is_sp = true;
+        return retval;
+    }
 if (g.n == 1) {
 // Single vertex is trivially SP
 std::shared_ptr<positive_cert_sp> sp{new positive_cert_sp{}};
@@ -954,23 +969,41 @@ for (int bicomp = 0; bicomp < n_bicomps; bicomp++) {
                     }
                 }
 
-                if (v == root) {
-    seq[w].compose((fake_edge ? sp_tree{} : sp_tree{v, w}), c_type::parallel);  // Changed to parallel
+                // Check if we need to return from DFS
+if (adj_index >= (int)g.adjLists[w].size()) {
+    // Handle return from DFS
+    if (w != root) {
+        if (earliest_outgoing[w] != g.n && earliest_outgoing[w] >= 0 && earliest_outgoing[w] < g.n) {
+            if (!vertex_stacks[earliest_outgoing[w]].empty()) {
+                N_LOG("Moving sequence " << seq[w] << " to tail\n")
+                vertex_stacks[earliest_outgoing[w]].top().tail = std::move(seq[w]);
+            }
+        }
+
+        if (v == root) {
+            seq[w].compose((fake_edge ? sp_tree{} : sp_tree{v, w}), c_type::series);
+
+            
+            if (cut_verts[w] != -1 && cut_verts[w] >= 0 && cut_verts[w] < (int)cut_vertex_attached_tree.size()) {
+                seq[w].compose(std::move(cut_vertex_attached_tree[cut_verts[w]]), c_type::series);
+            }
+            
+            dfs.pop(); // Pop the DFS stack
+            break;     // Exit the main DFS loop - we're done with this bicomp
+            
+        } else if (v >= 0) {
+            if (cut_verts[w] != -1 && cut_verts[w] >= 0 && cut_verts[w] < (int)cut_vertex_attached_tree.size()) {
+                cut_vertex_attached_tree[cut_verts[w]].l_compose(sp_tree{w, v}, c_type::dangling);
+                seq[w].compose(std::move(cut_vertex_attached_tree[cut_verts[w]]), c_type::series);
+            } else {
+                seq[w].compose(sp_tree{w, v}, c_type::series);
+            }
+        }
+    }
     
-    if (cut_verts[w] != -1 && cut_verts[w] >= 0 && cut_verts[w] < (int)cut_vertex_attached_tree.size()) {
-        seq[w].compose(std::move(cut_vertex_attached_tree[cut_verts[w]]), c_type::series);
-    }
-    break;
-} else if (v >= 0) {
-    if (cut_verts[w] != -1 && cut_verts[w] >= 0 && cut_verts[w] < (int)cut_vertex_attached_tree.size()) {
-        cut_vertex_attached_tree[cut_verts[w]].l_compose(sp_tree{w, v}, c_type::dangling);
-        seq[w].compose(std::move(cut_vertex_attached_tree[cut_verts[w]]), c_type::series);
-    } else {
-        seq[w].compose(sp_tree{w, v}, c_type::series);
-    }
+    dfs.pop(); // Always pop when done with a vertex
+    continue;  // Continue to next iteration
 }
-dfs.pop();
-continue;
         
         // Get current adjacency
         int u = g.adjLists[w][adj_index];
