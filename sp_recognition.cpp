@@ -168,7 +168,8 @@ struct sp_tree {
     int source() const { return root ? root->source : -1; }
     int sink() const { return root ? root->sink : -1; }
     
-    void compose(sp_tree&& other, c_type comp) {
+    // Fix the compose function - the current logic is incorrect
+void compose(sp_tree&& other, c_type comp) {
     if (!other.root) return;
     if (!root) {
         root = other.root;
@@ -179,18 +180,26 @@ struct sp_tree {
     int new_source, new_sink;
     switch (comp) {
         case c_type::series:
-            // Series: this -> other, connecting at shared vertex
+            // Series: this.source -> this.sink == other.source -> other.sink
+            // Result should be this.source -> other.sink
             new_source = root->source;
             new_sink = other.root->sink;
             break;
         case c_type::parallel:
         case c_type::antiparallel:
-            // Parallel/antiparallel: both subgraphs have same endpoints
+            // Parallel: both should have same endpoints
+            // Verify they match before composing
+            if (root->source != other.root->source || root->sink != other.root->sink) {
+                // This is a composition error - endpoints don't match
+                delete other.root;
+                other.root = nullptr;
+                return;
+            }
             new_source = root->source;
             new_sink = root->sink;
             break;
         case c_type::dangling:
-            // Dangling: other dangles off this
+            // Dangling: other hangs off this, result has this's endpoints
             new_source = root->source;
             new_sink = root->sink;
             break;
@@ -696,45 +705,51 @@ return false;
 }
 
 bool ear_wins(edge_t ear_new, edge_t ear_current, std::vector<int> const& dfs_no, int w) {
-// Handle infinity ear (no current ear)
-if (ear_current.first >= (int)dfs_no.size() || ear_current.second >= (int)dfs_no.size()) {
-return true;
+    // Handle infinity ear (no current ear)
+    if (ear_current.first >= (int)dfs_no.size() || ear_current.second >= (int)dfs_no.size()) {
+        return true;
+    }
+    
+    // Validate bounds
+    if (ear_new.first >= (int)dfs_no.size() || ear_new.second >= (int)dfs_no.size() ||
+        ear_new.first < 0 || ear_new.second < 0 ||
+        ear_current.first < 0 || ear_current.second < 0) {
+        return false;
+    }
+    
+    int new_sink_dfs = dfs_no[ear_new.second];
+    int curr_sink_dfs = dfs_no[ear_current.second];
+
+    // Part (i): Compare sink DFS numbers (lexicographically earlier = smaller DFS number)
+    if (new_sink_dfs < curr_sink_dfs) return true;
+    if (new_sink_dfs > curr_sink_dfs) return false;
+
+    // Same sink - apply parts (ii) and (iii)
+    // Part (ii): Non-trivial ears (source != w) win over trivial ears (source == w)
+    // This was backwards in your implementation!
+    if (ear_new.first != w && ear_current.first == w) return true;     // new wins (non-trivial beats trivial)
+    if (ear_current.first != w && ear_new.first == w) return false;    // current wins (non-trivial beats trivial)
+    
+    // Part (iii): Both same triviality, compare source DFS numbers
+    int new_src_dfs = dfs_no[ear_new.first];
+    int curr_src_dfs = dfs_no[ear_current.first];
+
+    return new_src_dfs < curr_src_dfs;
 }
-// Validate bounds
-if (ear_new.first >= (int)dfs_no.size() || ear_new.second >= (int)dfs_no.size() ||
-ear_new.first < 0 || ear_new.second < 0 ||
-ear_current.first < 0 || ear_current.second < 0) {
-return false;
-}
-int new_sink_dfs = dfs_no[ear_new.second];
-int curr_sink_dfs = dfs_no[ear_current.second];
-
-// Part (i): Compare sink DFS numbers (lexicographically earlier = smaller DFS number)
-if (new_sink_dfs < curr_sink_dfs) return true;
-if (new_sink_dfs > curr_sink_dfs) return false;
-
-// Same sink - apply parts (ii) and (iii)
-// Part (ii): Trivial ears (source == w) win over non-trivial ears
-if (ear_new.first == w && ear_current.first != w) return false;    // new is trivial, loses
-if (ear_current.first == w && ear_new.first != w) return true;     // current is trivial, new wins
-// Part (iii): Both trivial or both non-trivial, compare source DFS numbers
-int new_src_dfs = dfs_no[ear_new.first];
-int curr_src_dfs = dfs_no[ear_current.first];
-
-return new_src_dfs < curr_src_dfs;
-}
-
 bool positive_cert_sp::authenticate(graph const& g) {
     if (verified) return true;
     
     L_LOG("====== AUTHENTICATE SP DECOMPOSITION TREE ======\n")
-        if (g.n <= 1 || g.e == 0) {
-        if (!decomposition.root) {
+    
+    // Handle trivial cases
+    if (g.n <= 1 || g.e == 0) {
+        if (!decomposition.root || (g.n == 1 && g.e == 0)) {
             L_LOG("====== AUTH SUCCESS (trivial graph) ======\n\n")
             verified = true;
             return true;
         }
     }
+    
     if (!decomposition.root) {
         L_LOG("====== AUTH FAILED: decomposition tree does not exist ======\n\n")
         return false;
@@ -745,15 +760,23 @@ bool positive_cert_sp::authenticate(graph const& g) {
     g2.adjLists.resize(g.n);
     g2.e = 0;
     
-    // Recursive helper function
-    std::function<bool(sp_tree_node*, bool)> validate_node = [&](sp_tree_node* node, bool swapped) -> bool {
-        if (!node) return false;
+    // Use iterative traversal to avoid stack overflow and properly handle swapping
+    std::stack<std::pair<sp_tree_node*, bool>> stack; // (node, swapped)
+    std::stack<std::pair<sp_tree_node*, int>> processing; // (node, phase)
+    
+    stack.emplace(decomposition.root, false);
+    
+    while (!stack.empty()) {
+        auto [node, swapped] = stack.top();
+        stack.pop();
+        
+        if (!node) continue;
         
         int source = swapped ? node->sink : node->source;
         int sink = swapped ? node->source : node->sink;
         
         if (source < 0 || source >= g.n || sink < 0 || sink >= g.n) {
-            L_LOG("====== AUTH FAILED: invalid vertex indices ======\n\n")
+            L_LOG("====== AUTH FAILED: invalid vertex indices (" << source << ", " << sink << ") ======\n\n")
             return false;
         }
         
@@ -764,67 +787,71 @@ bool positive_cert_sp::authenticate(graph const& g) {
                 return false;
             }
             g2.add_edge(source, sink);
-            return true;
-        }
-        
-        if (!node->l || !node->r) {
+        } else if (node->l && node->r) {
+            // Internal node - validate and push children
+            bool left_swapped = swapped;
+            bool right_swapped = swapped;
+            
+            // For antiparallel, the right child is swapped relative to current state
+            if (node->comp == c_type::antiparallel) {
+                right_swapped = !swapped;
+            }
+            
+            // Push children for processing (reverse order so left is processed first)
+            stack.emplace(node->r, right_swapped);
+            stack.emplace(node->l, left_swapped);
+            
+            // Validate composition constraints
+            int lsource = left_swapped ? node->l->sink : node->l->source;
+            int lsink = left_swapped ? node->l->source : node->l->sink;
+            int rsource = right_swapped ? node->r->sink : node->r->source;
+            int rsink = right_swapped ? node->r->source : node->r->sink;
+            
+            switch (node->comp) {
+                case c_type::series:
+                    // Series: left.source -> left.sink -> right.source -> right.sink
+                    // Constraints: left.source == parent.source, right.sink == parent.sink, left.sink == right.source
+                    if (lsource != source || rsink != sink || lsink != rsource) {
+                        L_LOG("====== AUTH FAILED: series composition mismatch ======\n")
+                        L_LOG("Expected: " << source << "->" << sink << " via " << lsource << "->" << lsink << "->" << rsource << "->" << rsink << "\n")
+                        return false;
+                    }
+                    break;
+                case c_type::parallel:
+                    // Parallel: both children have same endpoints as parent
+                    if (lsource != source || rsource != source || lsink != sink || rsink != sink) {
+                        L_LOG("====== AUTH FAILED: parallel composition mismatch ======\n")
+                        L_LOG("Expected: both children (" << source << "," << sink << "), got left(" << lsource << "," << lsink << ") right(" << rsource << "," << rsink << ")\n")
+                        return false;
+                    }
+                    break;
+                case c_type::antiparallel:
+                    // Antiparallel: one child matches parent, other is reversed
+                    if (swapped) {
+                        // When parent is swapped, left child matches parent, right child is "un-swapped"
+                        if (lsource != source || lsink != sink || rsource != sink || rsink != source) {
+                            L_LOG("====== AUTH FAILED: antiparallel composition mismatch (parent swapped) ======\n")
+                            return false;
+                        }
+                    } else {
+                        // When parent is not swapped, left child matches parent, right child is swapped
+                        if (lsource != source || lsink != sink || rsource != sink || rsink != source) {
+                            L_LOG("====== AUTH FAILED: antiparallel composition mismatch (parent not swapped) ======\n")
+                            return false;
+                        }
+                    }
+                    break;
+                case c_type::dangling:
+                    L_LOG("====== AUTH FAILED: dangling composition not allowed in SP tree ======\n\n")
+                    return false;
+                default:
+                    L_LOG("====== AUTH FAILED: unknown composition type ======\n\n")
+                    return false;
+            }
+        } else {
             L_LOG("====== AUTH FAILED: node has exactly one child ======\n\n")
             return false;
         }
-        
-        // Internal node
-        bool left_swapped = swapped;
-        bool right_swapped = (node->comp == c_type::antiparallel) ? !swapped : swapped;
-        
-        if (!validate_node(node->l, left_swapped) || !validate_node(node->r, right_swapped)) {
-            return false;
-        }
-        
-        // Validate composition constraints
-        int lsource = left_swapped ? node->l->sink : node->l->source;
-        int lsink = left_swapped ? node->l->source : node->l->sink;
-        int rsource = right_swapped ? node->r->sink : node->r->source;
-        int rsink = right_swapped ? node->r->source : node->r->sink;
-        
-        switch (node->comp) {
-            case c_type::series:
-                if (lsource != source || rsink != sink || lsink != rsource) {
-                    L_LOG("====== AUTH FAILED: series composition mismatch ======\n\n")
-                    return false;
-                }
-                break;
-            case c_type::parallel:
-                if (lsource != source || rsource != source || lsink != sink || rsink != sink) {
-                    L_LOG("====== AUTH FAILED: parallel composition mismatch ======\n\n")
-                    return false;
-                }
-                break;
-            case c_type::antiparallel:
-                if (swapped) {
-                    if (lsource != sink || rsource != source || lsink != source || rsink != sink) {
-                        L_LOG("====== AUTH FAILED: antiparallel composition mismatch (swapped) ======\n\n")
-                        return false;
-                    }
-                } else {
-                    if (lsource != source || rsource != sink || lsink != sink || rsink != source) {
-                        L_LOG("====== AUTH FAILED: antiparallel composition mismatch ======\n\n")
-                        return false;
-                    }
-                }
-                break;
-            case c_type::dangling:
-                L_LOG("====== AUTH FAILED: dangling composition not allowed in SP tree ======\n\n")
-                return false;
-            default:
-                L_LOG("====== AUTH FAILED: unknown composition type ======\n\n")
-                return false;
-        }
-        
-        return true;
-    };
-    
-    if (!validate_node(decomposition.root, false)) {
-        return false;
     }
     
     // Check graph isomorphism
@@ -836,7 +863,12 @@ bool positive_cert_sp::authenticate(graph const& g) {
         radix_sort(l2);
         
         if (l1 != l2) {
-            L_LOG("====== AUTH FAILED: adjacency list mismatch at vertex " << i << " ======\n\n")
+            L_LOG("====== AUTH FAILED: adjacency list mismatch at vertex " << i << " ======\n")
+            L_LOG("Original: ");
+            for (int v : l1) L_LOG(v << " ");
+            L_LOG("\nReconstructed: ");
+            for (int v : l2) L_LOG(v << " ");
+            L_LOG("\n");
             return false;
         }
     }
@@ -965,25 +997,30 @@ if (adj_index >= (int)g.adjLists[w].size()) {
         }
 
         if (v == root) {
-            seq[w].compose((fake_edge ? sp_tree{} : sp_tree{v, w}), c_type::series);
-
-            
-            if (cut_verts[w] != -1 && cut_verts[w] >= 0 && cut_verts[w] < (int)cut_vertex_attached_tree.size()) {
-                seq[w].compose(std::move(cut_vertex_attached_tree[cut_verts[w]]), c_type::series);
-            }
-            
-            dfs.pop(); // Pop the DFS stack
-            break;     // Exit the main DFS loop - we're done with this bicomp
-            
-        } else if (v >= 0) {
-            if (cut_verts[w] != -1 && cut_verts[w] >= 0 && cut_verts[w] < (int)cut_vertex_attached_tree.size()) {
-                cut_vertex_attached_tree[cut_verts[w]].l_compose(sp_tree{w, v}, c_type::dangling);
-                seq[w].compose(std::move(cut_vertex_attached_tree[cut_verts[w]]), c_type::series);
-            } else {
-                seq[w].compose(sp_tree{w, v}, c_type::series);
-            }
-        }
+    // At root - this is the final edge, compose with parallel not series
+    // because we're closing the cycle formed by the ear
+    if (fake_edge) {
+        seq[w] = seq[w]; // No edge to add
+    } else {
+        sp_tree root_edge{v, w};
+        seq[w].compose(std::move(root_edge), c_type::parallel);
     }
+    
+    if (cut_verts[w] != -1 && cut_verts[w] >= 0 && cut_verts[w] < (int)cut_vertex_attached_tree.size()) {
+        seq[w].compose(std::move(cut_vertex_attached_tree[cut_verts[w]]), c_type::series);
+    }
+    
+    dfs.pop();
+    break;
+} else if (v >= 0) {
+    // Regular parent edge - series composition
+    if (cut_verts[w] != -1 && cut_verts[w] >= 0 && cut_verts[w] < (int)cut_vertex_attached_tree.size()) {
+        cut_vertex_attached_tree[cut_verts[w]].l_compose(sp_tree{w, v}, c_type::dangling);
+        seq[w].compose(std::move(cut_vertex_attached_tree[cut_verts[w]]), c_type::series);
+    } else {
+        seq[w].compose(sp_tree{w, v}, c_type::series);
+    }
+}
     
     dfs.pop(); // Always pop when done with a vertex
     continue;  // Continue to next iteration
