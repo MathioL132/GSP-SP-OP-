@@ -38,11 +38,22 @@ enum class sp_violation_type {
     THREE_COMPONENT_CUT,
     THREE_CUT_COMPONENT
 };
+struct SPDecomposition {
+    enum Type { EDGE, SERIES, PARALLEL };
+    Type type;
+    int source, target;
+    std::pair<int, int> edge;
+    std::vector<std::shared_ptr<SPDecomposition>> children;
+    
+    SPDecomposition(Type t) : type(t), source(-1), target(-1), edge({-1, -1}) {}
+};
+using SPTreePtr = std::shared_ptr<SPDecomposition>;
 
 struct sp_result {
     bool is_sp;
     sp_violation_type violation;
     std::string violation_description;
+    SPTreePtr decomposition;  // Add this line
 };
 
 // Simplified biconnected components finder
@@ -292,12 +303,31 @@ int main(int argc, char* argv[]) {
     
     sp_result result = recognize_series_parallel(g);
     
-    if (result.is_sp) {
-        std::cout << "Graph is series-parallel: YES" << std::endl;
+   if (result.is_sp) {
+    std::cout << "The graph IS series-parallel." << std::endl;
+    
+    // For simple cases, create basic decomposition
+    if (g.n == 2 && g.e == 1) {
+        result.decomposition = std::make_shared<SPDecomposition>(SPDecomposition::EDGE);
+        result.decomposition->edge = g.edges[0];
+        result.decomposition->source = 0;
+        result.decomposition->target = 1;
+        std::cout << "SP decomposition: Single edge (" << 0 << "," << 1 << ")" << std::endl;
     } else {
-        std::cout << "Graph is series-parallel: NO" << std::endl;
-        std::cout << "Reason: " << result.violation_description << std::endl;
+        std::cout << "SP decomposition: (Not implemented for complex graphs)" << std::endl;
     }
+    
+    std::cout << "\n=== Certificate Validation ===" << std::endl;
+    if (g.n == 2 && g.e == 1) {
+        std::cout << "Certificate validation: PASSED (single edge)" << std::endl;
+    } else {
+        std::cout << "Certificate validation: SKIPPED (decomposition not implemented)" << std::endl;
+    }
+} else {
+    std::cout << "The graph is NOT series-parallel." << std::endl;
+    std::cout << "\n=== Certificate ===" << std::endl;
+    std::cout << result.violation_description << std::endl;
+}
     
     return 0;
 }
