@@ -1091,11 +1091,16 @@ for (int bicomp = 0; bicomp < n_bicomps; bicomp++) {
                             append_path(k4->bd, k4->b, k4->d);
                             
                             // Build ac using the interlacing ear
-                            int ear_src = vertex_stacks[k4->d].top().SP.underlying_tree_path_source();
-                            if (ear_src >= 0) {
-                                k4->ac.emplace_back(k4->c, ear_src);
-                                append_path(k4->ac, ear_src, k4->a);
-                            }
+                           if (!vertex_stacks[k4->d].empty()) {
+    sp_tree& violating_sp = vertex_stacks[k4->d].top().SP;
+    if (violating_sp.root) {
+        int ear_src = violating_sp.source();
+        if (ear_src >= 0) {
+            k4->ac.emplace_back(k4->c, ear_src);
+            append_path(k4->ac, ear_src, k4->a);
+        }
+    }
+}
                             
                             retval.reason = k4;
                             violation_found = true;
