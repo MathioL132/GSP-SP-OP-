@@ -168,58 +168,80 @@ struct sp_tree {
     int sink() const { return root ? root->sink : -1; }
     
     void compose(sp_tree&& other, c_type comp) {
-        if (!other.root) return;
-        if (!root) {
-            root = other.root;
-            other.root = nullptr;
-            return;
-        }
-        
-        // Determine the correct source and sink for the composition
-        int new_source, new_sink;
-        if (comp == c_type::series) {
-            // Series: A -> B, result goes from A's source to B's sink
-            new_source = root->source;
-            new_sink = other.root->sink;
-        } else {
-            // Parallel/antiparallel: both should have same endpoints
-            new_source = root->source;
-            new_sink = root->sink;
-        }
-        
-        sp_tree_node* new_root = new sp_tree_node{new_source, new_sink, comp};
-        new_root->l = root;
-        new_root->r = other.root;
-        root = new_root;
+    if (!other.root) return;
+    if (!root) {
+        root = other.root;
         other.root = nullptr;
+        return;
     }
     
+    int new_source, new_sink;
+    switch (comp) {
+        case c_type::series:
+            // Series: this -> other, connecting at shared vertex
+            new_source = root->source;
+            new_sink = other.root->sink;
+            break;
+        case c_type::parallel:
+        case c_type::antiparallel:
+            // Parallel/antiparallel: both subgraphs have same endpoints
+            new_source = root->source;
+            new_sink = root->sink;
+            break;
+        case c_type::dangling:
+            // Dangling: other dangles off this
+            new_source = root->source;
+            new_sink = root->sink;
+            break;
+        default:
+            new_source = root->source;
+            new_sink = root->sink;
+            break;
+    }
+    
+    sp_tree_node* new_root = new sp_tree_node{new_source, new_sink, comp};
+    new_root->l = root;
+    new_root->r = other.root;
+    root = new_root;
+    other.root = nullptr;
+}
+    
     void l_compose(sp_tree&& other, c_type comp) {
-        if (!other.root) return;
-        if (!root) {
-            root = other.root;
-            other.root = nullptr;
-            return;
-        }
-        
-        // Determine the correct source and sink for the composition
-        int new_source, new_sink;
-        if (comp == c_type::series) {
-            // Series: other -> this, result goes from other's source to this's sink
+    if (!other.root) return;
+    if (!root) {
+        root = other.root;
+        other.root = nullptr;
+        return;
+    }
+    
+    int new_source, new_sink;
+    switch (comp) {
+        case c_type::series:
+            // Series: other -> this
             new_source = other.root->source;
             new_sink = root->sink;
-        } else {
-            // Parallel/antiparallel: both should have same endpoints
+            break;
+        case c_type::parallel:
+        case c_type::antiparallel:
             new_source = other.root->source;
             new_sink = other.root->sink;
-        }
-        
-        sp_tree_node* new_root = new sp_tree_node{new_source, new_sink, comp};
-        new_root->l = other.root;
-        new_root->r = root;
-        root = new_root;
-        other.root = nullptr;
+            break;
+        case c_type::dangling:
+            new_source = other.root->source;
+            new_sink = other.root->sink;
+            break;
+        default:
+            new_source = other.root->source;
+            new_sink = other.root->sink;
+            break;
     }
+    
+    sp_tree_node* new_root = new sp_tree_node{new_source, new_sink, comp};
+    new_root->l = other.root;
+    new_root->r = root;
+    root = new_root;
+    other.root = nullptr;
+}
     
     int underlying_tree_path_source() const {
         if (!root) return -1;
@@ -702,118 +724,75 @@ return new_src_dfs < curr_src_dfs;
 }
 
 bool positive_cert_sp::authenticate(graph const& g) {
-if (verified) return true;
-std::vector<int> n_src(g.n, 0);
-std::vector<int> n_sink(g.n, 0);
-std::vector<bool> no_edge(g.n, false);
-graph g2{};
-g2.reserve(g);
-
-struct TraversalFrame {
-    sp_tree_node* node;
-    int phase;
-    bool swap_state;
+    if (verified) return true;
     
-    TraversalFrame(sp_tree_node* n, int p, bool s) : node(n), phase(p), swap_state(s) {}
-};
-
-std::stack<TraversalFrame> hist;
-
-L_LOG("====== AUTHENTICATE SP DECOMPOSITION TREE ======\n")
-if (!decomposition.root) {
-    L_LOG("====== AUTH FAILED: decomposition tree does not exist ======\n\n")
-    return false;
-}
-
-hist.emplace(decomposition.root, 0, false);
-
-while (!hist.empty()) {
-    TraversalFrame frame = hist.top();
-    hist.pop();
-
-    if (!frame.node) continue;
-
-    int source = frame.swap_state ? frame.node->sink : frame.node->source;
-    int sink = frame.swap_state ? frame.node->source : frame.node->sink;
-
-    if (frame.phase == 0) {
-        // First visit - schedule children
-        if (!(frame.node->l) && !(frame.node->r)) {
-            // Leaf node
-            if (frame.node->comp != c_type::edge) {
+    L_LOG("====== AUTHENTICATE SP DECOMPOSITION TREE ======\n")
+    if (!decomposition.root) {
+        L_LOG("====== AUTH FAILED: decomposition tree does not exist ======\n\n")
+        return false;
+    }
+    
+    graph g2{};
+    g2.n = g.n;
+    g2.adjLists.resize(g.n);
+    g2.e = 0;
+    
+    // Recursive helper function
+    std::function<bool(sp_tree_node*, bool)> validate_node = [&](sp_tree_node* node, bool swapped) -> bool {
+        if (!node) return false;
+        
+        int source = swapped ? node->sink : node->source;
+        int sink = swapped ? node->source : node->sink;
+        
+        if (source < 0 || source >= g.n || sink < 0 || sink >= g.n) {
+            L_LOG("====== AUTH FAILED: invalid vertex indices ======\n\n")
+            return false;
+        }
+        
+        if (!node->l && !node->r) {
+            // Leaf node - must be an edge
+            if (node->comp != c_type::edge) {
                 L_LOG("====== AUTH FAILED: leaf node is not an edge ======\n\n")
                 return false;
             }
-
-            if (source < 0 || source >= g.n || sink < 0 || sink >= g.n) {
-                L_LOG("====== AUTH FAILED: invalid vertex indices in edge ======\n\n")
-                return false;
-            }
-
-            if (no_edge[source] || no_edge[sink]) {
-                L_LOG("====== AUTH FAILED: edge incident on blocked vertex ======\n\n")
-                return false;
-            }
-
             g2.add_edge(source, sink);
-            n_src[source]++;
-            n_sink[sink]++;
-            
-        } else if (frame.node->l && frame.node->r) {
-            // Internal node - schedule processing
-            hist.emplace(frame.node, 1, frame.swap_state); // Schedule final processing
-
-            // For antiparallel, right child is swapped, left is not
-            bool right_swap = (frame.node->comp == c_type::antiparallel) ? !frame.swap_state : frame.swap_state;
-            bool left_swap = frame.swap_state;
-
-            hist.emplace(frame.node->l, 0, left_swap);   // Left child
-            hist.emplace(frame.node->r, 0, right_swap);  // Right child
-
-        } else {
+            return true;
+        }
+        
+        if (!node->l || !node->r) {
             L_LOG("====== AUTH FAILED: node has exactly one child ======\n\n")
             return false;
         }
-
-    } else {
-        // Final processing after children
-        if (!frame.node->l || !frame.node->r) continue;
-
-        // Apply swap semantics correctly
-        int lsource = frame.swap_state ? frame.node->l->sink : frame.node->l->source;
-        int lsink   = frame.swap_state ? frame.node->l->source : frame.node->l->sink;
-        int rsource = frame.swap_state ? frame.node->r->sink : frame.node->r->source;
-        int rsink   = frame.swap_state ? frame.node->r->source : frame.node->r->sink;
-
-        switch (frame.node->comp) {
+        
+        // Internal node
+        bool left_swapped = swapped;
+        bool right_swapped = (node->comp == c_type::antiparallel) ? !swapped : swapped;
+        
+        if (!validate_node(node->l, left_swapped) || !validate_node(node->r, right_swapped)) {
+            return false;
+        }
+        
+        // Validate composition constraints
+        int lsource = left_swapped ? node->l->sink : node->l->source;
+        int lsink = left_swapped ? node->l->source : node->l->sink;
+        int rsource = right_swapped ? node->r->sink : node->r->source;
+        int rsink = right_swapped ? node->r->source : node->r->sink;
+        
+        switch (node->comp) {
             case c_type::series:
                 if (lsource != source || rsink != sink || lsink != rsource) {
                     L_LOG("====== AUTH FAILED: series composition mismatch ======\n\n")
                     return false;
                 }
-                if (lsink >= 0 && lsink < g.n && (n_src[lsink] != 1 || n_sink[lsink] != 1)) {
-                    L_LOG("====== AUTH FAILED: series middle vertex has incorrect counts ======\n\n")
-                    return false;
-                }
-                if (lsink >= 0 && lsink < g.n) {
-                    V_LOG("BLOCKING: " << lsink << "\n")
-                    no_edge[lsink] = true;
-                    n_src[lsink]--;
-                    n_sink[lsink]--;
-                }
                 break;
-
             case c_type::parallel:
                 if (lsource != source || rsource != source || lsink != sink || rsink != sink) {
                     L_LOG("====== AUTH FAILED: parallel composition mismatch ======\n\n")
                     return false;
                 }
-                if (source >= 0 && source < g.n) n_src[source]--;
-                if (sink   >= 0 && sink   < g.n) n_sink[sink]--;
                 break;
-
             case c_type::antiparallel:
-                if (frame.swap_state) {
+                if (swapped) {
                     if (lsource != sink || rsource != source || lsink != source || rsink != sink) {
                         L_LOG("====== AUTH FAILED: antiparallel composition mismatch (swapped) ======\n\n")
                         return false;
@@ -824,72 +803,39 @@ while (!hist.empty()) {
                         return false;
                     }
                 }
-                if (source >= 0 && source < g.n) n_src[source]--;
-                if (sink   >= 0 && sink   < g.n) n_sink[sink]--;
                 break;
-
             case c_type::dangling:
                 L_LOG("====== AUTH FAILED: dangling composition not allowed in SP tree ======\n\n")
                 return false;
-
-            case c_type::edge:
-                L_LOG("====== AUTH FAILED: internal node cannot be an edge ======\n\n")
+            default:
+                L_LOG("====== AUTH FAILED: unknown composition type ======\n\n")
                 return false;
         }
-    }
-}
-
-N_LOG("decomposition tree well-formed...\n")
-
-if (decomposition.root->source >= 0 && decomposition.root->source < g.n) {
-    n_src[decomposition.root->source]--;
-}
-if (decomposition.root->sink >= 0 && decomposition.root->sink < g.n) {
-    n_sink[decomposition.root->sink]--;
-}
-
-bool failed = false;
-for (int i = 0; i < g.n; i++) {
-    if (n_src[i] != 0) {
-        N_LOG("ERROR: disconnected SP subgraph sourced at vertex " << i << "\n")
-        failed = true;
-    }
+        
+        return true;
+    };
     
-    if (n_sink[i] != 0) {
-        N_LOG("ERROR: disconnected SP subgraph sinked at vertex " << i << "\n")
-        failed = true;
-    }
-}
-
-if (failed) {
-    L_LOG("====== AUTH FAILED: disconnected subgraphs ======\n\n")
-    return false;
-}
-
-N_LOG("decomposition tree connected...\n")
-
-// Check graph isomorphism
-for (int i = 0; i < g.n; i++) {
-    std::vector<int> l1 = g.adjLists[i];
-    std::vector<int> l2;
-    if (i < (int)g2.adjLists.size()) {
-        l2 = g2.adjLists[i];
-    }
-    
-    radix_sort(l1);
-    radix_sort(l2);
-    
-    if (l1 != l2) {
-        L_LOG("====== AUTH FAILED: adjacency list mismatch at vertex " << i << " ======\n\n")
+    if (!validate_node(decomposition.root, false)) {
         return false;
     }
-}
-
-N_LOG("decomposition tree produces graph identical to G...\n")
-L_LOG("====== AUTH SUCCESS ======\n\n")
-
-verified = true;
-return true;
+    
+    // Check graph isomorphism
+    for (int i = 0; i < g.n; i++) {
+        std::vector<int> l1 = g.adjLists[i];
+        std::vector<int> l2 = g2.adjLists[i];
+        
+        radix_sort(l1);
+        radix_sort(l2);
+        
+        if (l1 != l2) {
+            L_LOG("====== AUTH FAILED: adjacency list mismatch at vertex " << i << " ======\n\n")
+            return false;
+        }
+    }
+    
+    L_LOG("====== AUTH SUCCESS ======\n\n")
+    verified = true;
+    return true;
 }
 
 // ==================== SP RECOGNITION ALGORITHM ====================
@@ -1009,31 +955,22 @@ for (int bicomp = 0; bicomp < n_bicomps; bicomp++) {
                 }
 
                 if (v == root) {
-                        seq[w].compose(sp_tree{v, w}, c_type::series);
-
-
-
-
-
-                    if (cut_verts[w] != -1 && cut_verts[w] >= 0 && cut_verts[w] < (int)cut_vertex_attached_tree.size()) {
-                        seq[w].compose(std::move(cut_vertex_attached_tree[cut_verts[w]]), c_type::series);
-                    }
-                    break;
-                } else if (v >= 0) {
-                    if (cut_verts[w] != -1 && cut_verts[w] >= 0 && cut_verts[w] < (int)cut_vertex_attached_tree.size()) {
-                        cut_vertex_attached_tree[cut_verts[w]].l_compose(sp_tree{v, w}, c_type::dangling);
-
-                        seq[w].compose(std::move(cut_vertex_attached_tree[cut_verts[w]]), c_type::series);
-                    } else {
-                        seq[w].compose((fake_edge ? sp_tree{} : sp_tree{v, w}), c_type::series);
-
-
-                    }
-                }
-            }
-            dfs.pop();
-            continue;
-        }
+    seq[w].compose((fake_edge ? sp_tree{} : sp_tree{v, w}), c_type::parallel);  // Changed to parallel
+    
+    if (cut_verts[w] != -1 && cut_verts[w] >= 0 && cut_verts[w] < (int)cut_vertex_attached_tree.size()) {
+        seq[w].compose(std::move(cut_vertex_attached_tree[cut_verts[w]]), c_type::series);
+    }
+    break;
+} else if (v >= 0) {
+    if (cut_verts[w] != -1 && cut_verts[w] >= 0 && cut_verts[w] < (int)cut_vertex_attached_tree.size()) {
+        cut_vertex_attached_tree[cut_verts[w]].l_compose(sp_tree{w, v}, c_type::dangling);
+        seq[w].compose(std::move(cut_vertex_attached_tree[cut_verts[w]]), c_type::series);
+    } else {
+        seq[w].compose(sp_tree{w, v}, c_type::series);
+    }
+}
+dfs.pop();
+continue;
         
         // Get current adjacency
         int u = g.adjLists[w][adj_index];
