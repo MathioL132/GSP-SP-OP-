@@ -187,8 +187,7 @@ void compose(sp_tree&& other, c_type comp) {
             break;
         case c_type::parallel:
         case c_type::antiparallel:
-            // Parallel: both should have same endpoints
-            // Verify they match before composing
+            
             if (root->source != other.root->source || root->sink != other.root->sink) {
                 // This is a composition error - endpoints don't match
                 delete other.root;
@@ -727,7 +726,7 @@ bool ear_wins(edge_t ear_new, edge_t ear_current, std::vector<int> const& dfs_no
     // Same sink - apply parts (ii) and (iii)
     // Part (ii): Non-trivial ears (source != w) win over trivial ears (source == w)
     // This was backwards in your implementation!
-    if (ear_new.first != w && ear_current.first == w) return true;     // new wins (non-trivial beats trivial)
+    if (ear_new.first != w && ear_current.first == w) return true;     // non-trivial wins
     if (ear_current.first != w && ear_new.first == w) return false;    // current wins (non-trivial beats trivial)
     
     // Part (iii): Both same triviality, compare source DFS numbers
@@ -827,18 +826,16 @@ bool positive_cert_sp::authenticate(graph const& g) {
                     break;
                 case c_type::antiparallel:
                     // Antiparallel: one child matches parent, other is reversed
-                    if (swapped) {
-                        // When parent is swapped, left child matches parent, right child is "un-swapped"
-                        if (lsource != source || lsink != sink || rsource != sink || rsink != source) {
-                            L_LOG("====== AUTH FAILED: antiparallel composition mismatch (parent swapped) ======\n")
-                            return false;
-                        }
-                    } else {
+                    if (lsource != source || lsink != sink) {
+        L_LOG("====== AUTH FAILED: antiparallel left child mismatch ======\n")
+        return false;
+    }
+                     else {
                         // When parent is not swapped, left child matches parent, right child is swapped
-                        if (lsource != source || lsink != sink || rsource != sink || rsink != source) {
-                            L_LOG("====== AUTH FAILED: antiparallel composition mismatch (parent not swapped) ======\n")
-                            return false;
-                        }
+                        if (rsource != sink || rsink != source) {
+        L_LOG("====== AUTH FAILED: antiparallel right child mismatch ======\n")
+        return false;
+    }
                     }
                     break;
                 case c_type::dangling:
@@ -950,6 +947,11 @@ for (int bicomp = 0; bicomp < n_bicomps; bicomp++) {
     dfs = std::stack<std::pair<int, int>>{}; // Clear stack
     dfs.emplace(root, -1);
     dfs.emplace(next, 0);
+        for (int i = 0; i < g.n; i++) {
+    seq[i] = sp_tree{}; // Will be built during DFS
+}
+    seq[next] = sp_tree{next, next}; // Start with self-loop that will be extended
+seq[root] = sp_tree{root, root};
 
     bool fake_edge = false;
     if (!retval.reason) {
@@ -996,14 +998,10 @@ if (adj_index >= (int)g.adjLists[w].size()) {
             }
         }
 
-        if (v == root) {
-    // At root - this is the final edge, compose with parallel not series
-    // because we're closing the cycle formed by the ear
-    if (fake_edge) {
-        seq[w] = seq[w]; // No edge to add
-    } else {
-        sp_tree root_edge{v, w};
-        seq[w].compose(std::move(root_edge), c_type::parallel);
+       if (v == root) {
+    // Complete the ear by adding the parent edge in SERIES
+    if (!fake_edge) {
+        seq[w].compose(sp_tree{w, v}, c_type::series);
     }
     
     if (cut_verts[w] != -1 && cut_verts[w] >= 0 && cut_verts[w] < (int)cut_vertex_attached_tree.size()) {
@@ -1012,12 +1010,19 @@ if (adj_index >= (int)g.adjLists[w].size()) {
     
     dfs.pop();
     break;
+}
+
+    
 } else if (v >= 0) {
-    // Regular parent edge - series composition
-    if (cut_verts[w] != -1 && cut_verts[w] >= 0 && cut_verts[w] < (int)cut_vertex_attached_tree.size()) {
+    // Regular vertex - extend the SP subgraph to include parent edge
+    // This is always a SERIES composition because we're extending the path
+    if (cut_verts[w] != -1 && cut_verts[w] >= 0 && 
+        cut_verts[w] < (int)cut_vertex_attached_tree.size()) {
+        // If there's a cut vertex tree, compose it as dangling first
         cut_vertex_attached_tree[cut_verts[w]].l_compose(sp_tree{w, v}, c_type::dangling);
         seq[w].compose(std::move(cut_vertex_attached_tree[cut_verts[w]]), c_type::series);
     } else {
+        // Just add the parent edge
         seq[w].compose(sp_tree{w, v}, c_type::series);
     }
 }
@@ -1140,62 +1145,54 @@ if (adj_index >= (int)g.adjLists[w].size()) {
 
                 // Use proper lexicographic comparison
                 if (ear_wins(ear_f, ear[w], dfs_no, w)) {
-                    // ear_f wins - case (b)
-                    if (ear[w].first != g.n && ear[w].first < g.n) {
-                        // Check previous winner is complete
-                        if (seq[w].source() != ear[w].second) {
-                            N_LOG("SP violation: incomplete previous winner\n")
-                            report_K4_sp(retval, parent, vertex_stacks, seq[w].source(), w, 
-                                       ear[w].second, ear[w].first, ear_f.second, ear_f.first);
-                            break;
-                        }
+    // ear_f wins - case (b)
+    if (ear[w].first != g.n && ear[w].first < g.n) {
+        // Check if previous winner is complete
+        if (seq[w].source() != ear[w].second) {
+            // Generate K4 for incomplete sequence
+            report_K4_sp(retval, parent, vertex_stacks, seq[w].source(), w, 
+                       ear[w].second, ear[w].first, ear_f.second, ear_f.first);
+            break;
+        }
+        // Store completed ear on vertex stack
+        if (ear[w].second >= 0 && ear[w].second < g.n) {
+            vertex_stacks[ear[w].second].emplace(std::move(seq[w]), w, sp_tree{});
+            earliest_outgoing[w] = ear[w].second;
+        }
+    }
+    ear[w] = ear_f;
+    seq[w] = std::move(seq_u);
+} else {
+    // Handle losing ear cases...
+    if (seq_u.source() != ear_f.second) {
+        report_K4_sp(retval, parent, vertex_stacks, seq_u.source(), w, 
+                   ear_f.second, ear_f.first, ear[w].second, ear[w].first);
+        break;
+    }
 
-                        // Store completed ear on vertex stack
-                        if (ear[w].second >= 0 && ear[w].second < g.n) {
-                            vertex_stacks[ear[w].second].emplace(std::move(seq[w]), w, sp_tree{});
-                            earliest_outgoing[w] = ear[w].second;
-                        }
-                    }
-                    ear[w] = ear_f;
-                    seq[w] = std::move(seq_u);
-                    
-                } else {
-                    // ear_f loses - case (a) or (c)  
-                    if (seq_u.source() != ear_f.second) {
-                        N_LOG("SP violation: incomplete child sequence\n")
-                        report_K4_sp(retval, parent, vertex_stacks, seq_u.source(), w, 
-                                   ear_f.second, ear_f.first, ear[w].second, ear[w].first);
-                        break;
-                    }
-
-                    if (dfs_no[ear_f.second] == dfs_no[ear[w].second]) {
-                        // Case (c) - same sink, merge sequences
-                        if (seq[w].source() != ear[w].second) {
-                            N_LOG("SP violation: incomplete parent sequence in case (c)\n")
-                            report_K4_sp(retval, parent, vertex_stacks, seq[w].source(), w, 
-                                       ear[w].second, ear[w].first, ear_f.second, ear_f.first);
-                            break;
-                        }
-                        seq[w].compose(std::move(seq_u), c_type::parallel);
-                        
-                    } else {
-                        // Case (a) - store losing ear
-                        if (ear_f.second >= 0 && ear_f.second < g.n) {
-                            if (!vertex_stacks[ear_f.second].empty() && 
-                                vertex_stacks[ear_f.second].top().end == w) {
-                                vertex_stacks[ear_f.second].top().SP.compose(std::move(seq_u), c_type::parallel);
-                            } else {
-                                vertex_stacks[ear_f.second].emplace(std::move(seq_u), w, sp_tree{});
-                                if (dfs_no[ear_f.second] < dfs_no[earliest_outgoing[w]]) {
-                                    earliest_outgoing[w] = ear_f.second;
-                                }
-                            }
-                        }
-                    }
+    if (dfs_no[ear_f.second] == dfs_no[ear[w].second]) {
+        // Case (c) - same sink, parallel composition
+        if (seq[w].source() != ear[w].second) {
+            report_K4_sp(retval, parent, vertex_stacks, seq[w].source(), w, 
+                       ear[w].second, ear[w].first, ear_f.second, ear_f.first);
+            break;
+        }
+        seq[w].compose(std::move(seq_u), c_type::parallel);
+    } else {
+        // Case (a) - different sink, store on stack
+        if (ear_f.second >= 0 && ear_f.second < g.n) {
+            if (!vertex_stacks[ear_f.second].empty() && 
+                vertex_stacks[ear_f.second].top().end == w) {
+                vertex_stacks[ear_f.second].top().SP.compose(std::move(seq_u), c_type::parallel);
+            } else {
+                vertex_stacks[ear_f.second].emplace(std::move(seq_u), w, sp_tree{});
+                if (dfs_no[ear_f.second] < dfs_no[earliest_outgoing[w]]) {
+                    earliest_outgoing[w] = ear_f.second;
                 }
             }
         }
-
+    }
+}
         dfs.top().second++;
     }
 
