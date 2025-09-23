@@ -175,6 +175,25 @@ struct sp_tree {
         return;
     }
     
+    // Determine the correct source and sink for the composition
+    int new_source, new_sink;
+    if (comp == c_type::series) {
+        // Series: A -> B, result goes from A's source to B's sink
+        new_source = root->source;
+        new_sink = other.root->sink;
+    } else {
+        // Parallel/antiparallel: both should have same endpoints
+        new_source = root->source;
+        new_sink = root->sink;
+    }
+    
+    sp_tree_node* new_root = new sp_tree_node{new_source, new_sink, comp};
+    new_root->l = root;
+    new_root->r = other.root;
+    root = new_root;
+    other.root = nullptr;
+}
+    
     // FIXED: For series, result goes from left source to right sink
     // For parallel, result goes from common source to common sink  
     int new_source = root->source;
@@ -1549,10 +1568,13 @@ if (ewin_src >= 0 && ewin_src < n && ewin_sink >= 0 && ewin_sink < n) {
 }
 
 // Build ac path (through the violating ear)
-int ear_path = earliest_violating_ear.underlying_tree_path_source();
-if (ear_path >= 0 && ear_path < n) {
-    k4->ac.emplace_back(k4->c, ear_path);
-    safe_add_path(k4->ac, ear_path, k4->a);
+// Build ac path (through the violating ear)
+if (earliest_violating_ear.root) {
+    int ear_path = earliest_violating_ear.source();
+    if (ear_path >= 0 && ear_path < n) {
+        k4->ac.emplace_back(k4->c, ear_path);
+        safe_add_path(k4->ac, ear_path, k4->a);
+    }
 }
 
 cert_out.reason = k4;
