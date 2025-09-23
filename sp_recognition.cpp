@@ -168,81 +168,65 @@ struct sp_tree {
     int sink() const { return root ? root->sink : -1; }
     
     void compose(sp_tree&& other, c_type comp) {
-    if (!other.root) return;
-    if (!root) {
-        root = other.root;
+        if (!other.root) return;
+        if (!root) {
+            root = other.root;
+            other.root = nullptr;
+            return;
+        }
+        
+        // Determine the correct source and sink for the composition
+        int new_source, new_sink;
+        if (comp == c_type::series) {
+            // Series: A -> B, result goes from A's source to B's sink
+            new_source = root->source;
+            new_sink = other.root->sink;
+        } else {
+            // Parallel/antiparallel: both should have same endpoints
+            new_source = root->source;
+            new_sink = root->sink;
+        }
+        
+        sp_tree_node* new_root = new sp_tree_node{new_source, new_sink, comp};
+        new_root->l = root;
+        new_root->r = other.root;
+        root = new_root;
         other.root = nullptr;
-        return;
     }
     
-    // Determine the correct source and sink for the composition
-    int new_source, new_sink;
-    if (comp == c_type::series) {
-        // Series: A -> B, result goes from A's source to B's sink
-        new_source = root->source;
-        new_sink = other.root->sink;
-    } else {
-        // Parallel/antiparallel: both should have same endpoints
-        new_source = root->source;
-        new_sink = root->sink;
-    }
-    
-    sp_tree_node* new_root = new sp_tree_node{new_source, new_sink, comp};
-    new_root->l = root;
-    new_root->r = other.root;
-    root = new_root;
-    other.root = nullptr;
-}
-    
-    // FIXED: For series, result goes from left source to right sink
-    // For parallel, result goes from common source to common sink  
-    int new_source = root->source;
-    int new_sink = (comp == c_type::series) ? other.root->sink : root->sink;
-    
-    sp_tree_node* new_root = new sp_tree_node{new_source, new_sink, comp};
-    new_root->l = root;
-    new_root->r = other.root;
-    root = new_root;
-    other.root = nullptr;
-}
-    
-   void l_compose(sp_tree&& other, c_type comp) {
-    if (!other.root) return;
-    if (!root) {
-        root = other.root;
+    void l_compose(sp_tree&& other, c_type comp) {
+        if (!other.root) return;
+        if (!root) {
+            root = other.root;
+            other.root = nullptr;
+            return;
+        }
+        
+        // Determine the correct source and sink for the composition
+        int new_source, new_sink;
+        if (comp == c_type::series) {
+            // Series: other -> this, result goes from other's source to this's sink
+            new_source = other.root->source;
+            new_sink = root->sink;
+        } else {
+            // Parallel/antiparallel: both should have same endpoints
+            new_source = other.root->source;
+            new_sink = other.root->sink;
+        }
+        
+        sp_tree_node* new_root = new sp_tree_node{new_source, new_sink, comp};
+        new_root->l = other.root;
+        new_root->r = root;
+        root = new_root;
         other.root = nullptr;
-        return;
     }
     
-    // Determine the correct source and sink for the composition
-    int new_source, new_sink;
-    if (comp == c_type::series) {
-        // Series: other -> this, result goes from other's source to this's sink
-        new_source = other.root->source;
-        new_sink = root->sink;
-    } else {
-        // Parallel/antiparallel: both should have same endpoints
-        new_source = other.root->source;
-        new_sink = other.root->sink;
+    int underlying_tree_path_source() const {
+        if (!root) return -1;
+        sp_tree_node* curr = root;
+        while (curr->l) curr = curr->l;
+        return curr->source;
     }
-    
-    sp_tree_node* new_root = new sp_tree_node{new_source, new_sink, comp};
-    new_root->l = other.root;
-    new_root->r = root;
-    root = new_root;
-    other.root = nullptr;
-}
-    
-    // FIXED: For series, result goes from left source to right sink
-    int new_source = other.root->source; 
-    int new_sink = (comp == c_type::series) ? root->sink : other.root->sink;
-    
-    sp_tree_node* new_root = new sp_tree_node{new_source, new_sink, comp};
-    new_root->l = other.root;
-    new_root->r = root;
-    root = new_root;
-    other.root = nullptr;
-}
 };
 
 std::ostream& operator<<(std::ostream& os, sp_tree const& tree) {
