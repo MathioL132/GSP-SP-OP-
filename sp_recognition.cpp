@@ -668,9 +668,8 @@ if (new_sink_dfs > curr_sink_dfs) return false;
 
 // Same sink - apply parts (ii) and (iii)
 // Part (ii): Trivial ears (source == w) win over non-trivial ears
-if (ear_new.first != w && ear_current.first == w) return true;     // non-trivial wins  
-if (ear_current.first != w && ear_new.first == w) return false;    // current is trivial, wins
-
+if (ear_new.first == w && ear_current.first != w) return false;    // new is trivial, loses
+if (ear_current.first == w && ear_new.first != w) return true;     // current is trivial, new wins
 // Part (iii): Both trivial or both non-trivial, compare source DFS numbers
 int new_src_dfs = dfs_no[ear_new.first];
 int curr_src_dfs = dfs_no[ear_current.first];
@@ -986,7 +985,9 @@ for (int bicomp = 0; bicomp < n_bicomps; bicomp++) {
                 }
 
                 if (v == root) {
-                    seq[w].compose((fake_edge ? sp_tree{} : sp_tree{v, w}), c_type::series);
+                        seq[w].compose((fake_edge ? sp_tree{} : sp_tree{w, v}), c_type::series);
+
+
 
                     if (cut_verts[w] != -1 && cut_verts[w] >= 0 && cut_verts[w] < (int)cut_vertex_attached_tree.size()) {
                         seq[w].compose(std::move(cut_vertex_attached_tree[cut_verts[w]]), c_type::series);
@@ -994,7 +995,8 @@ for (int bicomp = 0; bicomp < n_bicomps; bicomp++) {
                     break;
                 } else if (v >= 0) {
                     if (cut_verts[w] != -1 && cut_verts[w] >= 0 && cut_verts[w] < (int)cut_vertex_attached_tree.size()) {
-                        cut_vertex_attached_tree[cut_verts[w]].l_compose(sp_tree{w, v}, c_type::dangling);
+                        cut_vertex_attached_tree[cut_verts[w]].l_compose(sp_tree{v, w}, c_type::dangling);
+
                         seq[w].compose(std::move(cut_vertex_attached_tree[cut_verts[w]]), c_type::series);
                     } else {
                         seq[w].compose(sp_tree{w, v}, c_type::series);
