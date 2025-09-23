@@ -1009,7 +1009,9 @@ for (int bicomp = 0; bicomp < n_bicomps; bicomp++) {
                 }
 
                 if (v == root) {
-                        seq[w].compose((fake_edge ? sp_tree{} : sp_tree{w, v}), c_type::series);
+                        seq[w].compose(sp_tree{v, w}, c_type::series);
+
+
 
 
 
@@ -1023,7 +1025,9 @@ for (int bicomp = 0; bicomp < n_bicomps; bicomp++) {
 
                         seq[w].compose(std::move(cut_vertex_attached_tree[cut_verts[w]]), c_type::series);
                     } else {
-                        seq[w].compose(sp_tree{w, v}, c_type::series);
+                        seq[w].compose((fake_edge ? sp_tree{} : sp_tree{v, w}), c_type::series);
+
+
                     }
                 }
             }
