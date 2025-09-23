@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <cassert>
 #include <climits>
+#include <functional> 
 
 // ==================== LOGGING DEFINITIONS ====================
 #ifdef __VERBOSE_LOGGING__
@@ -854,14 +855,7 @@ int path_contains_edge(std::vector<edge_t> const&, edge_t);
 
 sp_result SP_RECOGNITION(graph const& g) {
 sp_result retval{};
-        if (g.n <= 0) {
-        // Empty graph - create minimal valid certificate
-        std::shared_ptr<positive_cert_sp> sp{new positive_cert_sp{}};
-        // Empty decomposition is valid for empty graph
-        retval.reason = sp;
-        retval.is_sp = true;
-        return retval;
-    }
+       
 if (g.n == 1) {
 // Single vertex is trivially SP
 std::shared_ptr<positive_cert_sp> sp{new positive_cert_sp{}};
