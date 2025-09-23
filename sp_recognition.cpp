@@ -168,41 +168,43 @@ struct sp_tree {
     int sink() const { return root ? root->sink : -1; }
     
     void compose(sp_tree&& other, c_type comp) {
-        if (!other.root) return;
-        if (!root) {
-            root = other.root;
-            other.root = nullptr;
-            return;
-        }
-        
-        sp_tree_node* new_root = new sp_tree_node{root->source, root->sink, comp};
-        new_root->l = root;
-        new_root->r = other.root;
-        root = new_root;
+    if (!other.root) return;
+    if (!root) {
+        root = other.root;
         other.root = nullptr;
+        return;
     }
+    
+    // FIXED: For series, result goes from left source to right sink
+    // For parallel, result goes from common source to common sink  
+    int new_source = root->source;
+    int new_sink = (comp == c_type::series) ? other.root->sink : root->sink;
+    
+    sp_tree_node* new_root = new sp_tree_node{new_source, new_sink, comp};
+    new_root->l = root;
+    new_root->r = other.root;
+    root = new_root;
+    other.root = nullptr;
+}
     
     void l_compose(sp_tree&& other, c_type comp) {
-        if (!other.root) return;
-        if (!root) {
-            root = other.root;
-            other.root = nullptr;
-            return;
-        }
-        
-        sp_tree_node* new_root = new sp_tree_node{other.root->source, root->sink, comp};
-        new_root->l = other.root;
-        new_root->r = root;
-        root = new_root;
+    if (!other.root) return;
+    if (!root) {
+        root = other.root;
         other.root = nullptr;
+        return;
     }
     
-    int underlying_tree_path_source() const {
-        if (!root) return -1;
-        sp_tree_node* curr = root;
-        while (curr->l) curr = curr->l;
-        return curr->source;
-    }
+    // FIXED: For series, result goes from left source to right sink
+    int new_source = other.root->source; 
+    int new_sink = (comp == c_type::series) ? root->sink : other.root->sink;
+    
+    sp_tree_node* new_root = new sp_tree_node{new_source, new_sink, comp};
+    new_root->l = other.root;
+    new_root->r = root;
+    root = new_root;
+    other.root = nullptr;
+}
 };
 
 std::ostream& operator<<(std::ostream& os, sp_tree const& tree) {
