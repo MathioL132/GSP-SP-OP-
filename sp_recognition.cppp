@@ -554,31 +554,31 @@ bool negative_cert_T4::authenticate(graph const& g) {
     std::vector<bool> seen(g.n, false);
     N_LOG("verify path c1a: ")
     if (!trace_path(c1, a, c1a, g, seen)) return false;
-N_LOG("verify path c2a: ")
-if (!trace_path(c2, a, c2a, g, seen)) return false;
-N_LOG("verify path ab: ")
-if (!trace_path(a, b, ab, g, seen)) return false;
-N_LOG("verify path c1b: ")
-if (!trace_path(c1, b, c1b, g, seen)) return false;
-N_LOG("verify path c2b: ")
-if (!trace_path(c2, b, c2b, g, seen)) return false;
-L_LOG("====== AUTH SUCCESS ======\n\n")
-verified = true;
-return true;
+    N_LOG("verify path c2a: ")
+    if (!trace_path(c2, a, c2a, g, seen)) return false;
+    N_LOG("verify path ab: ")
+    if (!trace_path(a, b, ab, g, seen)) return false;
+    N_LOG("verify path c1b: ")
+    if (!trace_path(c1, b, c1b, g, seen)) return false;
+    N_LOG("verify path c2b: ")
+    if (!trace_path(c2, b, c2b, g, seen)) return false;
+    L_LOG("====== AUTH SUCCESS ======\n\n")
+    verified = true;
+    return true;
 }
 
 bool negative_cert_tri_comp_cut::authenticate(graph const& g) {
 if (verified) return true;
-L_LOG("====== AUTHENTICATE THREE-COMPONENT CUT VERTEX: " << v << " ======\n")
+L_LOG("====== AUTHENTICATE THREE-COMPONENT CUT VERTEX: " << v << " ======\n");
 if (v < 0 || v >= g.n) {
-    L_LOG("====== AUTH FAILED: invalid vertex index ======\n\n")
+    L_LOG("====== AUTH FAILED: invalid vertex index ======\n\n");
     return false;
 }
 
 int comps = num_comps_after_removal(g, v);
 
 if (comps < 3) {
-    L_LOG("====== AUTH FAILED: vertex " << v << " only splits graph into " << comps << " components ======\n\n")
+    L_LOG("====== AUTH FAILED: vertex " << v << " only splits graph into " << comps << " components ======\n\n");
     return false;
 }
 
@@ -591,9 +591,9 @@ return true;
 
 bool negative_cert_tri_cut_comp::authenticate(graph const& g) {
 if (verified) return true;
-L_LOG("====== AUTHENTICATE BICOMP WITH THREE CUT VERTICES: cut vertices " << c1 << ", " << c2 << ", " << c3 << " ======\n")
+L_LOG("====== AUTHENTICATE BICOMP WITH THREE CUT VERTICES: cut vertices " << c1 << ", " << c2 << ", " << c3 << " ======\n");
 if (c1 < 0 || c1 >= g.n || c2 < 0 || c2 >= g.n || c3 < 0 || c3 >= g.n) {
-    L_LOG("====== AUTH FAILED: invalid vertex indices ======\n\n")
+    L_LOG("====== AUTH FAILED: invalid vertex indices ======\n\n");
     return false;
 }
 
@@ -942,8 +942,8 @@ for (int bicomp = 0; bicomp < n_bicomps; bicomp++) {
     if (root < 0 || root >= g.n || next < 0 || next >= g.n) {
         N_LOG("ERROR: Invalid vertex indices in bicomp " << bicomp << "\n")
         continue;
-    }
-        }
+    
+        
 
     dfs = std::stack<std::pair<int, int>>{}; // Clear stack
     dfs.emplace(root, -1);
@@ -984,7 +984,7 @@ seq[root] = sp_tree{root, root};
             dfs.pop();
             continue;
         }
-}
+
         
         int v = (parent[w] >= 0 && parent[w] < g.n) ? parent[w] : -1;
         
@@ -1197,6 +1197,7 @@ if (adj_index >= (int)g.adjLists[w].size()) {
 }
         dfs.top().second++;
     }
+        }
 
     if (retval.reason) {
         // Handle fake edge in certificates if needed
@@ -1467,6 +1468,7 @@ if (n_bicomps > 1) {
         }
     }
 }
+        }
 
 return retval;
 }
