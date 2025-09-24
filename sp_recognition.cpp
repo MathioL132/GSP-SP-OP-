@@ -1019,6 +1019,7 @@ sp_result SP_RECOGNITION(graph const& g) {
                     dfs.top().second++;
                     continue;
                 }
+}
 
                 bool child_back_edge = (dfs_no[u] < dfs_no[w] && u != v);
 
