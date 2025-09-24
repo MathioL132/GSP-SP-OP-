@@ -720,32 +720,30 @@ bool ear_wins(edge_t ear_new, edge_t ear_current, std::vector<int> const& dfs_no
 bool positive_cert_sp::authenticate(graph const& g) {
     if (verified) return true;
     
-    L_LOG("====== AUTHENTICATE SP DECOMPOSITION TREE ======\n")
     
-    // Handle trivial cases properly
-    if (g.n <= 1 && g.e == 0) {
+   L_LOG("====== AUTHENTICATE SP DECOMPOSITION TREE ======\n")
+    
+    // Handle trivial cases
+    if (g.n <= 1 || g.e == 0) {
         if (!decomposition.root) {
             L_LOG("====== AUTH SUCCESS (trivial graph) ======\n\n")
             verified = true;
             return true;
+        } else if (g.e == 0) {
+            L_LOG("====== AUTH FAILED: no edges but decomposition exists ======\n\n")
+            return false;
         }
     }
     
-    if (g.e == 0 && g.n > 1) {
-        // Disconnected graph with no edges - should have empty decomposition
-        if (!decomposition.root) {
-            L_LOG("====== AUTH SUCCESS (no edges) ======\n\n")
-            verified = true;
-            return true;
-        }
-        L_LOG("====== AUTH FAILED: no edges but decomposition exists ======\n\n")
+    if (!decomposition.root && g.e > 0) {
+        L_LOG("====== AUTH FAILED: non-trivial graph but no decomposition ======\n\n")
         return false;
     }
     
-    // For graphs with edges, we need a valid decomposition
     if (!decomposition.root) {
-        L_LOG("====== AUTH FAILED: decomposition tree does not exist ======\n\n")
-        return false;
+        L_LOG("====== AUTH SUCCESS (empty decomposition) ======\n\n")
+        verified = true;
+        return true;
     }
     
     // Reconstruct graph from decomposition tree
@@ -883,63 +881,17 @@ sp_result SP_RECOGNITION(graph const& g) {
         return retval;
     }
     
-    // CRITICAL FIX: Check for cycles first
-    // Any cycle of length 3 or more makes the graph non-SP
-    if (g.n == 3 && g.e == 3) {
-        // This is a triangle - definitely not SP
-        // Check if it's actually a triangle
-        bool is_triangle = true;
-        for (int i = 0; i < 3; i++) {
-            if (g.adjLists[i].size() != 2) {
-                is_triangle = false;
-                break;
-            }
-        }
-        if (is_triangle) {
-            // Create a simple K4 certificate (triangle is a subcase)
-            std::shared_ptr<negative_cert_K4> k4{new negative_cert_K4{}};
-            k4->a = 0; k4->b = 1; k4->c = 2; k4->d = 0; // d=a for triangle case
-            k4->ab.push_back({0, 1});
-            k4->bc.push_back({1, 2});
-            k4->cd.push_back({2, 0}); // Close the triangle
-            k4->ac = k4->cd; // Same edge
-            k4->ad = {}; // Empty path (same vertex)
-            k4->bd.push_back({1, 0}); // Reverse of ab
-            retval.reason = k4;
-            retval.is_sp = false;
-            return retval;
-        }
-    }
     
-    // Check for K4
-    if (g.n == 4 && g.e == 6) {
-        bool is_k4 = true;
-        for (int i = 0; i < 4; i++) {
-            if (g.adjLists[i].size() != 3) {
-                is_k4 = false;
-                break;
-            }
-        }
-        if (is_k4) {
-            std::shared_ptr<negative_cert_K4> k4{new negative_cert_K4{}};
-            k4->a = 0; k4->b = 1; k4->c = 2; k4->d = 3;
-            k4->ab.push_back({0, 1});
-            k4->ac.push_back({0, 2});
-            k4->ad.push_back({0, 3});
-            k4->bc.push_back({1, 2});
-            k4->bd.push_back({1, 3});
-            k4->cd.push_back({2, 3});
-            retval.reason = k4;
-            retval.is_sp = false;
-            return retval;
-        }
-    }
+    
+    
+  
+    
 
     std::vector<int> cut_verts(g.n, -1);
     std::vector<edge_t> bicomps = get_bicomps_sp(g, cut_verts, retval);
     int n_bicomps = (int)(bicomps.size());
 
-    if (retval.reason) return retval
+    if (retval.reason) return retval;
 
     std::vector<sp_tree> cut_vertex_attached_tree(n_bicomps);
     std::vector<int> comp(g.n, -1);
@@ -1075,73 +1027,77 @@ sp_result SP_RECOGNITION(graph const& g) {
                     
                     bool violation_found = false;
                     
-                    while (w >= 0 && w < (int)vertex_stacks.size() && 
-                           !vertex_stacks[w].empty() && !violation_found) {
-                        
-                        sp_chain_stack_entry& top_entry = vertex_stacks[w].top();
-                        
-                        if (seq[u].source() != top_entry.end) {
-                            N_LOG("SP violation: interlacing detected\n")
-                            
-                            std::shared_ptr<negative_cert_K4> k4{new negative_cert_K4{}};
-                            k4->b = seq[u].source();
-                            k4->a = top_entry.end;
-                            k4->c = w;
-                            k4->d = -1;
-                            
-                            auto append_path = [&](std::vector<edge_t>& path, int start, int end) {
-                                if (start == end) return;
-                                int current = start;
-                                while (current != end && current >= 0 && current < g.n && 
-                                       current < (int)parent.size()) {
-                                    int next_v = parent[current];
-                                    if (next_v < 0 || next_v >= g.n) break;
-                                    path.emplace_back(current, next_v);
-                                    current = next_v;
-                                }
-                            };
-                            
-                            append_path(k4->ab, k4->a, k4->b);
-                            append_path(k4->bc, k4->b, k4->c);
-                            
-                            int search_vertex = parent[k4->c];
-                            while (search_vertex >= 0 && search_vertex < g.n && k4->d == -1) {
-                                if (search_vertex < (int)vertex_stacks.size() && 
-                                    !vertex_stacks[search_vertex].empty()) {
-                                    if (vertex_stacks[search_vertex].top().end == k4->b) {
-                                        k4->d = search_vertex;
-                                        break;
-                                    }
-                                }
-                                search_vertex = parent[search_vertex];
-                            }
-                            
-                            if (k4->d >= 0) {
-                                append_path(k4->cd, k4->c, k4->d);
-                                append_path(k4->ad, k4->a, k4->d);
-                                append_path(k4->bd, k4->b, k4->d);
-                                
-                                if (!vertex_stacks[k4->d].empty()) {
-                                    sp_tree& violating_sp = vertex_stacks[k4->d].top().SP;
-                                    if (violating_sp.root) {
-                                        int ear_src = violating_sp.source();
-                                        if (ear_src >= 0) {
-                                            k4->ac.emplace_back(k4->c, ear_src);
-                                            append_path(k4->ac, ear_src, k4->a);
-                                        }
-                                    }
-                                }
-                                
-                                retval.reason = k4;
-                                violation_found = true;
-                            }
-                            break;
-                        }
-                        
-                        seq[u].compose(std::move(top_entry.SP), c_type::antiparallel);
-                        seq[u].l_compose(std::move(top_entry.tail), c_type::series);
-                        vertex_stacks[w].pop();
-                    }
+                   while (w >= 0 && w < (int)vertex_stacks.size() && 
+       !vertex_stacks[w].empty() && !violation_found) {
+    
+    sp_chain_stack_entry& top_entry = vertex_stacks[w].top();
+    
+    if (seq[u].source() != top_entry.end) {
+        N_LOG("SP violation: interlacing detected\n")
+        
+        std::shared_ptr<negative_cert_K4> k4{new negative_cert_K4{}};
+        
+        // Ensure all vertices are valid and distinct
+        int a = top_entry.end;
+        int b = seq[u].source();
+        int c = w;
+        int d = -1;
+        
+        if (a < 0 || a >= g.n || b < 0 || b >= g.n || c < 0 || c >= g.n || a == b || a == c || b == c) {
+            N_LOG("ERROR: Invalid vertex indices in K4 construction\n")
+            vertex_stacks[w].pop();
+            continue;
+        }
+        
+        // Find vertex d
+        int search_vertex = (c < (int)parent.size() && parent[c] >= 0) ? parent[c] : -1;
+        while (search_vertex >= 0 && search_vertex < g.n && d == -1) {
+            if (search_vertex < (int)vertex_stacks.size() && 
+                !vertex_stacks[search_vertex].empty()) {
+                if (vertex_stacks[search_vertex].top().end == b) {
+                    d = search_vertex;
+                    break;
+                }
+            }
+            search_vertex = (search_vertex < (int)parent.size() && parent[search_vertex] >= 0) ? 
+                           parent[search_vertex] : -1;
+        }
+        
+        if (d == -1 || d == a || d == b || d == c) {
+            N_LOG("ERROR: Could not find valid vertex d for K4\n")
+            vertex_stacks[w].pop();
+            continue;
+        }
+        
+        k4->a = a; k4->b = b; k4->c = c; k4->d = d;
+        
+        // Construct paths safely
+        auto safe_path = [&](std::vector<edge_t>& path, int start, int end) {
+            if (start == end) return; // Empty path for same vertex
+            int current = start;
+            int iterations = 0;
+            while (current != end && current >= 0 && current < g.n && 
+                   current < (int)parent.size() && iterations < g.n) {
+                int next_v = parent[current];
+                if (next_v < 0 || next_v >= g.n) break;
+                path.emplace_back(current, next_v);
+                current = next_v;
+                iterations++;
+            }
+        };
+        
+        safe_path(k4->ab, a, b);
+        safe_path(k4->bc, b, c);
+        safe_path(k4->cd, c, d);
+        safe_path(k4->ad, a, d);
+        safe_path(k4->bd, b, d);
+        safe_path(k4->ac, a, c);
+        
+        retval.reason = k4;
+        violation_found = true;
+        break;
+    }
+    
                     
                     if (violation_found) break;
                 }
