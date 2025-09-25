@@ -530,20 +530,21 @@ sp_result SP_RECOGNITION(graph const& g) {
     std::stack<std::pair<int,int>> dfs;
 
     dfs_no[g.n]=g.n;
-    bool do_k23_edge_replacement = true;
 
     for(int bicomp=0; bicomp<n_bicomps; bicomp++) {
-        // reset per bicomp
+        // === Reset per bicomp ===
         for (int i=0;i<g.n;i++){
             seq[i]=sp_tree{};
             ear[i]={g.n,g.n};
             earliest_outgoing[i]=g.n;
             num_children[i]=0;
             alert[i]=-1;
+            comp[i]=-1;
         }
 
         int root=bicomps[bicomp].first;
         int next=bicomps[bicomp].second;
+        dfs=std::stack<std::pair<int,int>>{};
         dfs.emplace(root,-1);
         dfs.emplace(next,0);
 
@@ -564,7 +565,8 @@ sp_result SP_RECOGNITION(graph const& g) {
                     }
                     if(v==root){
                         seq[w].compose((fake_edge? sp_tree{}: sp_tree{w,v}), c_type::parallel);
-                        if(cut_verts[w]!=-1) seq[w].compose(std::move(cut_vertex_attached_tree[cut_verts[w]]),c_type::series);
+                        if(cut_verts[w]!=-1) 
+                            seq[w].compose(std::move(cut_vertex_attached_tree[cut_verts[w]]),c_type::series);
                         seq[next]=std::move(seq[w]);
                         break;
                     } else {
@@ -590,8 +592,10 @@ sp_result SP_RECOGNITION(graph const& g) {
             if(parent[u]==w){
                 for(;!vertex_stacks[w].empty();vertex_stacks[w].pop()){
                     if(seq[u].source()!=vertex_stacks[w].top().end){
-                        report_K4_sp(retval,parent,vertex_stacks,seq[u].source(),w,
-                                     vertex_stacks[w].top().end,ear[u].first,ear[u].second,ear[w].first);
+                        report_K4_sp(retval,parent,vertex_stacks,
+                                     seq[u].source(),w,
+                                     vertex_stacks[w].top().end,
+                                     ear[u].first,ear[u].second,ear[w].first);
                         retval.is_sp=false; return retval;
                     }
                     seq[u].compose(std::move(vertex_stacks[w].top().SP),c_type::antiparallel);
@@ -605,8 +609,10 @@ sp_result SP_RECOGNITION(graph const& g) {
                 if(dfs_no[ear_f.second]<dfs_no[ear[w].second]){
                     if(ear[w].first!=g.n){
                         if(seq[w].source()!=ear[w].second){
-                            report_K4_sp(retval,parent,vertex_stacks,seq[w].source(),w,
-                                         ear[w].second,ear[w].first,ear_f.second,ear_f.first);
+                            report_K4_sp(retval,parent,vertex_stacks,
+                                         seq[w].source(),w,
+                                         ear[w].second,ear[w].first,
+                                         ear_f.second,ear_f.first);
                             retval.is_sp=false; return retval;
                         }
                         vertex_stacks[ear[w].second].emplace(std::move(seq[w]),w,sp_tree{});
@@ -615,24 +621,30 @@ sp_result SP_RECOGNITION(graph const& g) {
                     ear[w]=ear_f; seq[w]=std::move(seq_u);
                 } else {
                     if(seq_u.source()!=ear_f.second){
-                        report_K4_sp(retval,parent,vertex_stacks,seq_u.source(),w,
-                                     ear_f.second,ear_f.first,ear[w].second,ear[w].first);
+                        report_K4_sp(retval,parent,vertex_stacks,
+                                     seq_u.source(),w,
+                                     ear_f.second,ear_f.first,
+                                     ear[w].second,ear[w].first);
                         retval.is_sp=false; return retval;
                     }
                     if(dfs_no[ear_f.second]==dfs_no[ear[w].second]){
                         if(seq[w].source()!=ear[w].second){
-                            report_K4_sp(retval,parent,vertex_stacks,seq[w].source(),w,
-                                         ear[w].second,ear[w].first,ear_f.second,ear_f.first);
+                            report_K4_sp(retval,parent,vertex_stacks,
+                                         seq[w].source(),w,
+                                         ear[w].second,ear[w].first,
+                                         ear_f.second,ear_f.first);
                             retval.is_sp=false; return retval;
                         }
                         seq[w].compose(std::move(seq_u),c_type::parallel);
-                        if((ear[w].first==w||dfs_no[ear_f.first]<dfs_no[ear[w].first])&&ear_f.first!=w) ear[w]=ear_f;
+                        if((ear[w].first==w||dfs_no[ear_f.first]<dfs_no[ear[w].first])&&ear_f.first!=w) 
+                            ear[w]=ear_f;
                     } else {
                         if(!vertex_stacks[ear_f.second].empty() && vertex_stacks[ear_f.second].top().end==w){
                             vertex_stacks[ear_f.second].top().SP.compose(std::move(seq_u),c_type::parallel);
                         } else {
                             vertex_stacks[ear_f.second].emplace(std::move(seq_u),w,sp_tree{});
-                            if(dfs_no[ear_f.second]<dfs_no[earliest_outgoing[w]]) earliest_outgoing[w]=ear_f.second;
+                            if(dfs_no[ear_f.second]<dfs_no[earliest_outgoing[w]]) 
+                                earliest_outgoing[w]=ear_f.second;
                         }
                     }
                 }
@@ -641,7 +653,28 @@ sp_result SP_RECOGNITION(graph const& g) {
 
         dfs_no[root]=0;
 
-        // only mark positive cert if no negative detected
+        // === NEW: Cycle detection for K23 ===
+        {
+            std::vector<int> bicomp_nodes;
+            for(int i=0;i<g.n;i++) if(comp[i]==bicomp) bicomp_nodes.push_back(i);
+
+            bool all_deg2=true;
+            for(int v : bicomp_nodes) {
+                int deg=0;
+                for(int u:g.adjLists[v]) if(comp[u]==bicomp) deg++;
+                if(deg!=2) { all_deg2=false; break; }
+            }
+            if(all_deg2 && bicomp_nodes.size()>=3) {
+                auto k23=std::make_shared<negative_cert_K23>();
+                k23->a=bicomp_nodes[0];
+                k23->b=bicomp_nodes[1];
+                retval.reason=k23;
+                retval.is_sp=false;
+                return retval;
+            }
+        }
+
+        // Only mark positive cert if no negative detected
         if(!retval.reason){
             auto sp = std::make_shared<positive_cert_sp>();
             sp->decomposition=std::move(seq[next]);
@@ -651,6 +684,7 @@ sp_result SP_RECOGNITION(graph const& g) {
         }
     }
     return retval;
+}
 }
 int main(int argc, char* argv[]) {
     if(argc != 2) {
