@@ -28,6 +28,7 @@
 #endif
 
 using edge_t = std::pair<int,int>;
+struct graph;
 void radix_sort(std::vector<int>& v);
 bool trace_path(int end1, int end2, std::vector<edge_t> const& path, graph const& g, std::vector<bool>& seen);
 int num_comps_after_removal(graph const& g, int v);
