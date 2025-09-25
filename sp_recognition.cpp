@@ -28,7 +28,11 @@
 #endif
 
 using edge_t = std::pair<int,int>;
-
+void radix_sort(std::vector<int>& v);
+bool trace_path(int end1, int end2, std::vector<edge_t> const& path, graph const& g, std::vector<bool>& seen);
+int num_comps_after_removal(graph const& g, int v);
+bool is_cut_vertex(graph const& g, int v);
+int path_contains_edge(std::vector<edge_t> const& path, edge_t test);
 // ==================== GRAPH ====================
 struct graph {
     int n;
@@ -373,31 +377,39 @@ int path_contains_edge(std::vector<edge_t> const& path,edge_t test){
 }
 
 // ===================== FULL GET_BICOMPS_SP ======================
-std::vector<edge_t> get_bicomps_sp(graph const& g,std::vector<int>& cut_verts,sp_result& cert_out,int root=0){
-    std::vector<int> dfs_no(g.n,0),parent(g.n,-1),low(g.n,0);
+std::vector<edge_t> get_bicomps_sp(graph const& g, std::vector<int>& cut_verts, sp_result& cert_out, int root=0) {
+    std::vector<int> dfs_no(g.n,0), parent(g.n,-1), low(g.n,0);
     std::vector<edge_t> retval;
     std::stack<std::pair<int,int>> dfs;
+
     dfs.emplace(root,0);
     dfs_no[root]=1; low[root]=1; parent[root]=-1;
-    int curr_dfs=2; bool root_cut=false;
+    int curr_dfs=2;
+    bool root_cut=false;
 
     while(!dfs.empty()){
-        auto& [w,i]=dfs.top();
-        if(i<(int)g.adjLists[w].size()){
-            int u=g.adjLists[w][i++];
+        auto &p = dfs.top(); int w=p.first, i=p.second;
+        if(i < (int)g.adjLists[w].size()){
+            int u = g.adjLists[w][i];
+            p.second++;
             if(!dfs_no[u]){
                 dfs.push({u,0});
-                parent[u]=w; dfs_no[u]=curr_dfs++;
-                low[u]=dfs_no[u];
-            } else if(u!=parent[w]) low[w]=std::min(low[w],dfs_no[u]);
+                parent[u]=w;
+                dfs_no[u]=curr_dfs++; low[u]=dfs_no[u];
+            } else if(u!=parent[w]){
+                low[w] = std::min(low[w], dfs_no[u]);
+            }
         } else {
             dfs.pop();
             if(parent[w]!=-1){
                 if(low[w]>=dfs_no[parent[w]]){
                     if(cut_verts[w]!=-1){
-                        if(w!=root||root_cut){
-                            auto cut=std::make_shared<negative_cert_tri_comp_cut>();
-                            cut->v=w; cert_out.reason=cut;
+                        if(w!=root || root_cut){
+                            auto cut = std::make_shared<negative_cert_tri_comp_cut>();
+                            cut->v = w;
+                            cert_out.reason = cut;
+                            cert_out.is_sp = false;
+                            return retval;
                         } else root_cut=true;
                     } else cut_verts[w]=retval.size();
                     retval.emplace_back(w,parent[w]);
@@ -406,6 +418,7 @@ std::vector<edge_t> get_bicomps_sp(graph const& g,std::vector<int>& cut_verts,sp
             }
         }
     }
+
     if(!root_cut) cut_verts[root]=-1;
     if(cert_out.reason) return retval;
 
@@ -413,15 +426,17 @@ std::vector<edge_t> get_bicomps_sp(graph const& g,std::vector<int>& cut_verts,sp
     std::vector<int> prev_cut(retval.size(),-1);
     int root_one=-1, root_two=-1;
     for(int i=0;i<(int)retval.size()-1;i++){
-        int w=retval[i].first, u=-1,start=w;
+        int w=retval[i].first, u=-1, start=w;
         while(w!=root){
             u=w; w=parent[w];
             if(cut_verts[w]!=-1 && u==retval[cut_verts[w]].second){
                 if(prev_cut[cut_verts[w]]==-1) prev_cut[cut_verts[w]]=start;
                 else {
-                    auto cut=std::make_shared<negative_cert_tri_cut_comp>();
+                    auto cut = std::make_shared<negative_cert_tri_cut_comp>();
                     cut->c1=w; cut->c2=start; cut->c3=prev_cut[cut_verts[w]];
-                    cert_out.reason=cut; return retval;
+                    cert_out.reason=cut;
+                    cert_out.is_sp=false;
+                    return retval;
                 }
                 break;
             }
@@ -429,10 +444,12 @@ std::vector<edge_t> get_bicomps_sp(graph const& g,std::vector<int>& cut_verts,sp
         if(w==root && (u==retval.back().second||u==-1)){
             if(root_one==-1) root_one=start;
             else if(root_two==-1) root_two=start;
-            else{
-                auto cut=std::make_shared<negative_cert_tri_cut_comp>();
+            else {
+                auto cut = std::make_shared<negative_cert_tri_cut_comp>();
                 cut->c1=root_one; cut->c2=root_two; cut->c3=start;
-                cert_out.reason=cut; return retval;
+                cert_out.reason=cut;
+                cert_out.is_sp=false;
+                return retval;
             }
         }
     }
@@ -440,11 +457,11 @@ std::vector<edge_t> get_bicomps_sp(graph const& g,std::vector<int>& cut_verts,sp
     // Chain reordering
     int n_bicomps=(int)retval.size();
     if(n_bicomps>1){
-        int second_endpoint=n_bicomps-1;
+        int second_endpoint = n_bicomps-1;
         for(int i=1;i<n_bicomps-1;i++){
-            if(prev_cut[i]==-1){second_endpoint=i;break;}
+            if(prev_cut[i]==-1){ second_endpoint=i; break; }
         }
-        std::reverse(retval.begin()+second_endpoint,retval.end()-1);
+        std::reverse(retval.begin()+second_endpoint, retval.end()-1);
         if(second_endpoint!=n_bicomps-1){
             retval.back().second=retval[n_bicomps-2].first;
             retval.back().first=retval[n_bicomps-2].second;
@@ -458,7 +475,6 @@ std::vector<edge_t> get_bicomps_sp(graph const& g,std::vector<int>& cut_verts,sp
     }
     return retval;
 }
-
 // ===================== FULL REPORT_K4_SP ======================
 void report_K4_sp(sp_result& cert_out,
                   std::vector<int> const& parent,
@@ -490,6 +506,9 @@ void report_K4_sp(sp_result& cert_out,
         for(int x=ep;x!=k4->a;x=parent[x]) k4->ac.emplace_back(x,parent[x]);
     }
     cert_out.reason=k4;
+    cert_out.is_sp = false;
+
+
 }
 sp_result SP_RECOGNITION(graph const& g) {
     sp_result retval;
@@ -510,12 +529,20 @@ sp_result SP_RECOGNITION(graph const& g) {
     std::stack<std::pair<int,int>> dfs;
 
     dfs_no[g.n]=g.n;
-
     bool do_k23_edge_replacement = true;
 
-    for(int bicomp=0; bicomp<n_bicomps; bicomp++){
-        int root = bicomps[bicomp].first;
-        int next = bicomps[bicomp].second;
+    for(int bicomp=0; bicomp<n_bicomps; bicomp++) {
+        // reset per bicomp
+        for (int i=0;i<g.n;i++){
+            seq[i]=sp_tree{};
+            ear[i]={g.n,g.n};
+            earliest_outgoing[i]=g.n;
+            num_children[i]=0;
+            alert[i]=-1;
+        }
+
+        int root=bicomps[bicomp].first;
+        int next=bicomps[bicomp].second;
         dfs.emplace(root,-1);
         dfs.emplace(next,0);
 
@@ -527,8 +554,8 @@ sp_result SP_RECOGNITION(graph const& g) {
         int curr_dfs=3;
 
         while(!dfs.empty()){
-            auto &p = dfs.top(); int w=p.first; int v=parent[w];
-            if((size_t)p.second >= g.adjLists[w].size()){
+            auto &p=dfs.top(); int w=p.first; int v=parent[w];
+            if((size_t)p.second>=g.adjLists[w].size()){
                 if(w!=root){
                     if(earliest_outgoing[w]!=g.n){
                         if(!vertex_stacks[earliest_outgoing[w]].empty())
@@ -548,7 +575,8 @@ sp_result SP_RECOGNITION(graph const& g) {
                         }
                     }
                 }
-                dfs.pop(); continue;
+                dfs.pop();
+                continue;
             }
             int u=g.adjLists[w][p.second++];
             if(comp[u]!=-1 && comp[u]!=bicomp) continue;
@@ -559,7 +587,6 @@ sp_result SP_RECOGNITION(graph const& g) {
             }
             bool child_back=(dfs_no[u]<dfs_no[w] && u!=v);
             if(parent[u]==w){
-                // update-seq
                 for(;!vertex_stacks[w].empty();vertex_stacks[w].pop()){
                     if(seq[u].source()!=vertex_stacks[w].top().end){
                         report_K4_sp(retval,parent,vertex_stacks,seq[u].source(),w,
@@ -572,8 +599,8 @@ sp_result SP_RECOGNITION(graph const& g) {
                 if(retval.reason) return retval;
             }
             if(parent[u]==w||child_back){
-                edge_t ear_f = (child_back? edge_t{w,u}:ear[u]);
-                sp_tree seq_u = (child_back? sp_tree{u,w}: std::move(seq[u]));
+                edge_t ear_f=(child_back? edge_t{w,u}:ear[u]);
+                sp_tree seq_u=(child_back? sp_tree{u,w}:std::move(seq[u]));
                 if(dfs_no[ear_f.second]<dfs_no[ear[w].second]){
                     if(ear[w].first!=g.n){
                         if(seq[w].source()!=ear[w].second){
@@ -611,73 +638,16 @@ sp_result SP_RECOGNITION(graph const& g) {
             }
         }
 
-        // Fake edge handling: K4->T4 and K23 fake edge replacement
-        if(fake_edge){
-            edge_t fake={root,next};
-            // K4->T4
-            if(retval.reason){
-                auto k4=std::dynamic_pointer_cast<negative_cert_K4>(retval.reason);
-                if(k4){
-                    std::vector<edge_t>* k4_paths[6]={&k4->ab,&k4->ac,&k4->ad,&k4->bc,&k4->bd,&k4->cd};
-                    int k4_verts[4]={k4->a,k4->b,k4->c,k4->d};
-                    static const int k4_t4_trans[6][5]={{1,3,2,4,5},{0,3,2,5,4},{0,4,1,5,3},{0,1,4,5,2},{0,2,3,5,1},{1,2,3,4,0}};
-                    static const int k4_t4_end[6][4]={{0,1,2,3},{0,2,1,3},{0,3,1,2},{1,2,0,3},{1,3,0,2},{2,3,0,1}};
-                    int pathnum=-1,pos=-1;
-                    for(int i=0;i<6;i++){ pos=path_contains_edge(*k4_paths[i],fake); if(pos!=-1){ pathnum=i; break; }}
-                    if(pathnum!=-1){
-                        auto t4=std::make_shared<negative_cert_T4>();
-                        t4->c1a=std::move(*(k4_paths[k4_t4_trans[pathnum][0]]));
-                        t4->c2a=std::move(*(k4_paths[k4_t4_trans[pathnum][1]]));
-                        t4->c1b=std::move(*(k4_paths[k4_t4_trans[pathnum][2]]));
-                        t4->c2b=std::move(*(k4_paths[k4_t4_trans[pathnum][3]]));
-                        t4->ab =std::move(*(k4_paths[k4_t4_trans[pathnum][4]]));
-                        t4->c1=k4_verts[k4_t4_end[pathnum][0]];
-                        t4->c2=k4_verts[k4_t4_end[pathnum][1]];
-                        t4->a =k4_verts[k4_t4_end[pathnum][2]];
-                        t4->b =k4_verts[k4_t4_end[pathnum][3]];
-                        retval.reason=t4; retval.is_sp=false;
-                        for(int i=0;i<g.n;i++){
-                            if(comp[i]==bicomp){
-                                dfs_no[i]=0; parent[i]=0; ear[i]={g.n,g.n};
-                                earliest_outgoing[i]=g.n; num_children[i]=0;
-                                seq[i]=sp_tree{}; vertex_stacks[i]=std::stack<sp_chain_stack_entry>();
-                            }
-                        }
-                        bicomp--; continue;
-                    }
-                }
-            }
-            // K23 fake edge replacement — present in Nathan's, rarely triggered but included for perfect match
-            if(retval.reason && do_k23_edge_replacement) {
-                auto k23=std::dynamic_pointer_cast<negative_cert_K23>(retval.reason);
-                if(k23){
-                    std::vector<edge_t>* paths[3]={&k23->one,&k23->two,&k23->three};
-                    int p=-1,pos=-1;
-                    for(int i=0;i<3;i++){ pos=path_contains_edge(*paths[i],fake); if(pos!=-1){ p=i; break; } }
-                    if(p!=-1){
-                        std::vector<edge_t>& target=*paths[p];
-                        std::vector<edge_t> replacement;
-                        bool in_k23[g.n]; std::fill(in_k23,in_k23+g.n,false);
-                        for(auto arr:paths){ for(auto e:*arr){ in_k23[e.first]=true; in_k23[e.second]=true; } }
-                        for(int u2:g.adjLists[next]){
-                            if(comp[u2]==bicomp && parent[u2]==next && !in_k23[u2]){
-                                replacement.emplace_back(ear[u2].first,root);
-                                for(int x=ear[u2].first;x!=next;x=parent[x]) replacement.emplace_back(parent[x],x);
-                                break;
-                            }
-                        }
-                        std::reverse(replacement.begin(),replacement.end());
-                        target.erase(target.begin()+pos);
-                        target.insert(target.begin()+pos,replacement.begin(),replacement.end());
-                    }
-                }
-            }
-        }
-
         dfs_no[root]=0;
-        auto sp=std::make_shared<positive_cert_sp>();
-        sp->decomposition=std::move(seq[next]);
-        sp->is_sp=true; retval.reason=sp; retval.is_sp=true;
+
+        // only mark positive cert if no negative detected
+        if(!retval.reason){
+            auto sp = std::make_shared<positive_cert_sp>();
+            sp->decomposition=std::move(seq[next]);
+            sp->is_sp=true;
+            retval.reason=sp;
+            retval.is_sp=true;
+        }
     }
     return retval;
 }
