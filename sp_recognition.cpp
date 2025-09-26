@@ -78,9 +78,9 @@ std::istream& operator>>(std::istream& is, graph& g) {
         g.add_edge(endpoint1, endpoint2);
     }
 
-    for (std::vector<int> list : g.adjLists) {
-        list.shrink_to_fit();
-    }
+    for (std::vector<int>& list : g.adjLists) {
+    list.shrink_to_fit();
+}
 
     return is;
 }
@@ -621,7 +621,10 @@ struct positive_cert_sp : certificate {
         bool swap = false;
 
         graph g2{};
+        g2.n = g.n;
         g2.reserve(g);
+        g2.e = 0;
+        
         std::stack<std::pair<sp_tree_node *, int>> hist;
         L_LOG("====== AUTHENTICATE SP DECOMPOSITION TREE ======\n")
         if (!decomposition.root) {
@@ -1341,7 +1344,6 @@ sp_result SP_RECOGNITION(graph const& g) {
                         t4->b = k4_verts[k4_t4_endpoint_translation[pnum][3]];
 
                         retval.reason = t4;
-                        retval.reason.reset();
 
                         for (int i = 0; i < g.n; i++) {
                             if (comp[i] == bicomp) {
@@ -1378,8 +1380,7 @@ sp_result SP_RECOGNITION(graph const& g) {
                         N_LOG("FAKE EDGE IN K23 (" << violating_path[path_ind].first << ", " << violating_path[path_ind].second << "), REPLACE WITH PATH\n")
 
                         std::vector<edge_t> splice_path;
-                        bool in_k23[g.n];
-                        for (int i = 0; i < g.n; i++) in_k23[i] = false;
+                        std::vector<bool> in_k23(g.n, false);
 
                         for (std::vector<edge_t> * path : k23_paths) {
                             for (edge_t e : *path) {
